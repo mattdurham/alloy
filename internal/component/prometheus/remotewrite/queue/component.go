@@ -4,15 +4,15 @@ import (
 	"context"
 	"path/filepath"
 	"sync"
+	"time"
 
 	snappy "github.com/eapache/go-xerial-snappy"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-
 	"github.com/grafana/alloy/internal/component"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/cbor"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/filequeue"
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/networkqueue"
+	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/network"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 	"github.com/grafana/alloy/internal/featuregate"
 	"github.com/prometheus/prometheus/storage"
@@ -35,16 +35,16 @@ func NewComponent(opts component.Options, args Arguments) (*Queue, error) {
 	if err != nil {
 		return nil, err
 	}
-	serial, err := cbor.NewSerializer(args.BatchSizeBytes, args.FlushTime, fq)
+	serial, err := cbor.NewSerializer(args.BatchSizeBytes, args.FlushTime, fq, opts.Logger)
 	if err != nil {
 		return nil, err
 	}
 	s := &Queue{
-		opts: opts,
-		args: args,
-		s:    serial,
-		fq:   fq,
-		log:  opts.Logger,
+		opts:       opts,
+		args:       args,
+		serializer: serial,
+		fq:         fq,
+		log:        opts.Logger,
 	}
 	s.opts.OnStateChange(Exports{Receiver: s})
 	return s, nil
@@ -53,20 +53,20 @@ func NewComponent(opts component.Options, args Arguments) (*Queue, error) {
 // Queue is a queue based WAL used to send data to a remote_write endpoint. Queue supports replaying
 // and TTLs.
 type Queue struct {
-	mut    sync.RWMutex
-	args   Arguments
-	opts   component.Options
-	s      *cbor.Serializer
-	fq     filequeue.queue
-	client types.WriteClient
-	log    log.Logger
+	mut        sync.RWMutex
+	args       Arguments
+	opts       component.Options
+	serializer *cbor.Serializer
+	fq         filequeue.Storage
+	client     types.WriteClient
+	log        log.Logger
 }
 
 // Run starts the component, blocking until ctx is canceled or the component
 // suffers a fatal error. Run is guaranteed to be called exactly once per
 // Component.
 func (s *Queue) Run(ctx context.Context) error {
-	client, err := networkqueue.New(ctx, networkqueue.ConnectionConfig{
+	client, err := network.New(ctx, network.ConnectionConfig{
 		URL:           s.args.Connection.URL,
 		Username:      s.args.Connection.BasicAuth.Username,
 		Password:      s.args.Connection.BasicAuth.Password,
@@ -84,10 +84,18 @@ func (s *Queue) Run(ctx context.Context) error {
 	return nil
 }
 
+func (s *Queue) Update(args ConnectionConfig) {
+	// This needs to drain stop the loop then apply the configuration.
+	// In the case its unable to drain in a certain timeframe it should drop
+	// the loops.
+}
+
 func (s *Queue) runloop(ctx context.Context) {
 	buf := make([]byte, 0)
+	var name string
+	var err error
 	for {
-		buf, name, err := s.fq.Next(ctx, buf)
+		_, buf, name, err = s.fq.Next(ctx, buf)
 		// When we successfully grab the data then we need to delete it.
 		// Even if we fail deserializing it then we should still delete it.
 		s.fq.Delete(name)
@@ -106,6 +114,13 @@ func (s *Queue) runloop(ctx context.Context) {
 			continue
 		}
 		for _, series := range sg.Series {
+			// One last chance to check the TTL. Writing to the filequeue will check it but
+			// in a situation where the network is down and writing backs up we dont want to send
+			// data that will get rejected.
+			old := time.Since(time.Unix(series.TS, 0))
+			if old > s.args.TTL {
+				continue
+			}
 			// This should really return a channel that lets you know when it can queue more.
 			successful := s.client.Queue(ctx, series.Hash, series.Bytes)
 			if !successful {
@@ -133,6 +148,7 @@ func (s *Queue) Update(args component.Arguments) error {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 
+	//TODO @mattdurham, we need to propagate args down to the child items.
 	s.args = args.(Arguments)
 	s.opts.OnStateChange(Exports{Receiver: s})
 
@@ -146,5 +162,5 @@ func (c *Queue) Appender(ctx context.Context) storage.Appender {
 	c.mut.RLock()
 	defer c.mut.RUnlock()
 
-	return newAppender(c, c.args.TTL, c.s, c.opts.Logger)
+	return cbor.NewAppender(c.args.TTL, c.serializer, c.args.AppenderBatchSize, c.opts.Logger)
 }

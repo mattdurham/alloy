@@ -2,10 +2,10 @@ package filequeue
 
 import (
 	"context"
-	"github.com/go-kit/log"
 	"testing"
 	"time"
 
+	"github.com/go-kit/log"
 	"github.com/stretchr/testify/require"
 )
 
@@ -14,23 +14,43 @@ func TestFileQueue(t *testing.T) {
 	log := log.NewNopLogger()
 	q, err := NewQueue(dir, log)
 	require.NoError(t, err)
-	handle, err := q.Add([]byte("test"))
+	handle, err := q.Add(nil, []byte("test"))
 	require.NoError(t, err)
 	require.True(t, handle != "")
 
 	ctx := context.Background()
 	buf := make([]byte, 0)
-	buf, name, err := q.Next(ctx, buf)
+	meta, buf, name, err := q.Next(ctx, buf)
 	require.NoError(t, err)
+	require.NotNil(t, meta)
 	require.True(t, name != "")
 	require.True(t, string(buf) == "test")
 
-	q.Delete(name)
-
 	ctx, cncl := context.WithTimeout(ctx, 1*time.Second)
 	defer cncl()
-	buf, name, err = q.Next(ctx, buf)
+	meta, buf, name, err = q.Next(ctx, buf)
 	require.Error(t, err)
+	require.Nil(t, meta)
 	require.True(t, len(buf) == 0)
 	require.True(t, name == "")
+}
+
+func TestMetaFileQueue(t *testing.T) {
+	dir := t.TempDir()
+	log := log.NewNopLogger()
+	q, err := NewQueue(dir, log)
+	require.NoError(t, err)
+
+	handle, err := q.Add(map[string]string{"name": "bob"}, []byte("test"))
+	require.NoError(t, err)
+	require.True(t, handle != "")
+
+	ctx := context.Background()
+	buf := make([]byte, 0)
+	meta, buf, name, err := q.Next(ctx, buf)
+	require.NoError(t, err)
+	require.NotNil(t, meta)
+	require.True(t, meta["name"] == "bob")
+	require.True(t, name != "")
+	require.True(t, string(buf) == "test")
 }

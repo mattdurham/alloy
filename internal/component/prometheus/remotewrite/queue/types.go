@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/prometheus/prometheus/storage"
@@ -8,10 +9,10 @@ import (
 
 func defaultArgs() Arguments {
 	return Arguments{
-		TTL:            2 * time.Hour,
-		Evict:          1 * time.Hour,
-		BatchSizeBytes: 32 * 1024 * 1024,
-		FlushTime:      5 * time.Second,
+		TTL:               2 * time.Hour,
+		BatchSizeBytes:    32 * 1024 * 1024,
+		FlushTime:         5 * time.Second,
+		AppenderBatchSize: 1_000,
 		Connection: ConnectionConfig{
 			Timeout:                 15 * time.Second,
 			RetryBackoff:            1 * time.Second,
@@ -24,23 +25,33 @@ func defaultArgs() Arguments {
 }
 
 type Arguments struct {
-	TTL            time.Duration     `alloy:"ttl,attr,optional"`
-	Evict          time.Duration     `alloy:"evict_interval,attr,optional"`
-	BatchSizeBytes int               `alloy:"batch_size_bytes,attr,optional"`
-	ExternalLabels map[string]string `alloy:"external_labels,attr,optional"`
-	FlushTime      time.Duration     `alloy:"flush_time,attr,optional"`
-	Connection     ConnectionConfig  `alloy:"endpoint,block"`
+	// TTL is how old a series can be.
+	TTL time.Duration `alloy:"ttl,attr,optional"`
+	// The batch size to persist to the file queue.
+	BatchSizeBytes int `alloy:"batch_size_bytes,attr,optional"`
+	// How often to flush to the file queue if BatchSizeBytes isn't met.
+	FlushTime  time.Duration    `alloy:"flush_time,attr,optional"`
+	Connection ConnectionConfig `alloy:"endpoint,block"`
+	// AppenderBatchSize determines how often to flush the appender batch size.
+	AppenderBatchSize int `alloy:"appender_batch_size,attr,optional"`
 }
 
 type ConnectionConfig struct {
-	URL                     string        `alloy:"url,attr"`
-	BasicAuth               BasicAuth     `alloy:"basic_auth,block,optional"`
-	Timeout                 time.Duration `alloy:"write_timeout,attr,optional"`
-	RetryBackoff            time.Duration `alloy:"retry_backoff,attr,optional"`
-	MaxRetryBackoffAttempts time.Duration `alloy:"max_retry_backoff,attr,optional"`
-	BatchCount              int           `alloy:"batch_count,attr,optional"`
-	FlushDuration           time.Duration `alloy:"flush_duration,attr,optional"`
-	QueueCount              uint          `alloy:"queue_count,attr,optional"`
+	URL       string        `alloy:"url,attr"`
+	BasicAuth BasicAuth     `alloy:"basic_auth,block,optional"`
+	Timeout   time.Duration `alloy:"write_timeout,attr,optional"`
+	// How long to wait between retries.
+	RetryBackoff time.Duration `alloy:"retry_backoff,attr,optional"`
+	// Maximum number of retries.
+	MaxRetryBackoffAttempts int `alloy:"max_retry_backoff,attr,optional"`
+	// How many series to write at a time.
+	BatchCount int `alloy:"batch_count,attr,optional"`
+	// How long to wait before sending regardless of batch count.
+	FlushDuration time.Duration `alloy:"flush_duration,attr,optional"`
+	// How many concurrent queues to have.
+	QueueCount uint `alloy:"queue_count,attr,optional"`
+
+	ExternalLabels map[string]string `alloy:"external_labels,attr,optional"`
 }
 
 type BasicAuth struct {
@@ -58,5 +69,11 @@ func (rc *Arguments) SetToDefault() {
 }
 
 func (r *Arguments) Validate() error {
+	if r.AppenderBatchSize == 0 {
+		return fmt.Errorf("appender_batch_size must be greater than zero")
+	}
+	if r.Connection.BatchCount <= 0 {
+		return fmt.Errorf("batch_count must be greater than 0")
+	}
 	return nil
 }

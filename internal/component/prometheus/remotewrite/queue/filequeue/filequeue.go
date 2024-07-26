@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"golang.design/x/chann"
@@ -21,9 +22,17 @@ type queue struct {
 	directory string
 	maxIndex  int
 	logger    log.Logger
-	ch        *chann.Chann[string]
+	// ch is an unbounded queue. It contains the names of files in the WAL.
+	ch *chann.Chann[string]
 }
 
+// Record wraps the input data and combines it with the metadata.
+type Record struct {
+	Meta map[string]string `cbor:"1,keyasint"`
+	Data []byte            `cbor:"2,keyasint"`
+}
+
+// NewQueue returns a implementation of Storage.
 func NewQueue(directory string, logger log.Logger) (Storage, error) {
 	err := os.MkdirAll(directory, 0777)
 	if err != nil {
@@ -32,14 +41,12 @@ func NewQueue(directory string, logger log.Logger) (Storage, error) {
 
 	matches, _ := filepath.Glob(filepath.Join(directory, "*.committed"))
 	ids := make([]int, len(matches))
-	names := make([]string, 0)
 
 	for i, x := range matches {
 		id, err := strconv.Atoi(strings.ReplaceAll(filepath.Base(x), ".committed", ""))
 		if err != nil {
 			continue
 		}
-		names = append(names, x)
 		ids[i] = id
 	}
 	sort.Ints(ids)
@@ -53,6 +60,7 @@ func NewQueue(directory string, logger log.Logger) (Storage, error) {
 		logger:    logger,
 		ch:        chann.New[string](),
 	}
+	// Push the files that currently exist to the channel.
 	for _, id := range ids {
 		q.ch.In() <- filepath.Join(directory, fmt.Sprintf("%d.committed", id))
 	}
@@ -60,35 +68,58 @@ func NewQueue(directory string, logger log.Logger) (Storage, error) {
 }
 
 // Add a committed file to the queue.
-func (q *queue) Add(data []byte) (string, error) {
+func (q *queue) Add(meta map[string]string, data []byte) (string, error) {
 	q.mut.Lock()
 	defer q.mut.Unlock()
+
+	if meta == nil {
+		meta = make(map[string]string)
+	}
 	q.maxIndex++
 	name := filepath.Join(q.directory, fmt.Sprintf("%d.committed", q.maxIndex))
 	level.Debug(q.logger).Log("msg", "adding bytes", "len", len(data), "name", name)
-	err := q.writeFile(name, data)
-	// In is an unbounded queue.
+	// record wraps the data and metadata in one. This allows the consumer to take action based on the map.
+	r := &Record{
+		Meta: meta,
+		Data: data,
+	}
+	rBuf, err := cbor.Marshal(r)
+	if err != nil {
+		return "", err
+	}
+	err = q.writeFile(name, rBuf)
+	if err != nil {
+		return "", err
+	}
+	// In is an unbounded queue, that contains the names of the user. Chann is 2 goroutines with a slice in the middle.
 	q.ch.In() <- name
 	return name, err
 }
 
-func (q *queue) Next(ctx context.Context, enc []byte) ([]byte, string, error) {
+// Next waits for a new entry to be added to the queue. It will block until an entry is returned or the context finished.
+func (q *queue) Next(ctx context.Context, enc []byte) (map[string]string, []byte, string, error) {
 	select {
 	case name := <-q.ch.Out():
 		buf, err := q.readFile(name, enc)
+		defer q.delete(name)
+		if err != nil {
+			return nil, nil, "", err
+		}
 		level.Debug(q.logger).Log("msg", "reading bytes", "len", len(buf), "name", name)
 
+		r := &Record{}
+		err = cbor.Unmarshal(buf, r)
 		if err != nil {
-			return nil, "", err
+			return nil, nil, "", err
 		}
-		return buf, name, nil
+		return r.Meta, r.Data, name, nil
 	case <-ctx.Done():
 		q.ch.Close()
-		return nil, "", errors.New("context done")
+		return nil, nil, "", errors.New("context done")
 	}
 }
 
-func (q *queue) Delete(name string) {
+func (q *queue) delete(name string) {
 	_ = os.Remove(name)
 }
 

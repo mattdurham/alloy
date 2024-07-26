@@ -1,9 +1,9 @@
 package cbor
 
 import (
-	"bytes"
-	"github.com/klauspost/compress/zstd"
-	"io"
+	snappy "github.com/eapache/go-xerial-snappy"
+	"github.com/go-kit/log"
+	"github.com/grafana/alloy/internal/alloy/logging/level"
 	"math"
 	"sync"
 	"time"
@@ -13,9 +13,10 @@ import (
 )
 
 type Raw struct {
-	Hash  uint64 `cbor:"1,keyasint"`
-	Bytes []byte `cbor:"2,keyasint"`
-	Ts    int64  `cbor:"3,keyasint"`
+	_     struct{} `cbor:",toarray"`
+	Hash  uint64   `cbor:"1,keyasint"`
+	Bytes []byte   `cbor:"2,keyasint"`
+	TS    int64    `cbor:"3,keyasint"`
 }
 
 type SeriesGroup struct {
@@ -45,9 +46,10 @@ type Serializer struct {
 	group         *SeriesGroup
 	lastFlush     time.Time
 	bytesInGroup  uint32
+	logger        log.Logger
 }
 
-func NewSerializer(maxSizeBytes int, flushDuration time.Duration, q filequeue.Storage) (*Serializer, error) {
+func NewSerializer(maxSizeBytes int, flushDuration time.Duration, q filequeue.Storage, l log.Logger) (*Serializer, error) {
 	return &Serializer{
 		maxSizeBytes:  maxSizeBytes,
 		flushDuration: flushDuration,
@@ -56,6 +58,7 @@ func NewSerializer(maxSizeBytes int, flushDuration time.Duration, q filequeue.St
 			Series:   make([]*Raw, 0),
 			Metadata: make([]*Raw, 0),
 		},
+		logger: l,
 	}, nil
 }
 
@@ -65,10 +68,11 @@ func (s *Serializer) AppendMetadata(data []*Raw) error {
 
 	for _, d := range data {
 		s.group.Metadata = append(s.group.Series, d)
-		s.bytesInGroup = +uint32(len(d.Bytes)) + 4
+		s.bytesInGroup = s.bytesInGroup + uint32(len(d.Bytes)) + 4
 	}
 	// If we would go over the max size then send, or if we have hit the flush duration then send.
 	if s.bytesInGroup > uint32(s.maxSizeBytes) {
+		level.Debug(s.logger).Log("flushing to disk due to maxSizeBytes", s.maxSizeBytes)
 		return s.store()
 	} else if time.Since(s.lastFlush) > s.flushDuration {
 		return s.store()
@@ -77,15 +81,19 @@ func (s *Serializer) AppendMetadata(data []*Raw) error {
 }
 
 func (s *Serializer) Append(data []*Raw) error {
+	if len(data) == 0 {
+		return nil
+	}
 	s.mut.Lock()
 	defer s.mut.Unlock()
 
 	for _, d := range data {
 		s.group.Series = append(s.group.Series, d)
-		s.bytesInGroup = +uint32(len(d.Bytes)) + 4
+		s.bytesInGroup = s.bytesInGroup + uint32(len(d.Bytes)) + 4
 	}
 	// If we would go over the max size then send, or if we have hit the flush duration then send.
 	if s.bytesInGroup > uint32(s.maxSizeBytes) {
+		level.Debug(s.logger).Log("flushing to disk due to maxSizeBytes", s.maxSizeBytes)
 		return s.store()
 	} else if time.Since(s.lastFlush) > s.flushDuration {
 		return s.store()
@@ -107,19 +115,8 @@ func (s *Serializer) store() error {
 		// Something went wrong with serializing the whole group so lets drop it.
 		return err
 	}
-	out := bytes.NewBuffer(nil)
-	enc, err := zstd.NewWriter(out)
-	if err != nil {
-		return err
-	}
-	in := bytes.NewBuffer(buffer)
-	_, err = io.Copy(enc, in)
-	if err != nil {
-		_ = enc.Close()
-		return err
-	}
-	_ = enc.Close()
-
-	_, err = s.queue.Add(out.Bytes())
+	out := snappy.Encode(buffer)
+	_, err = s.queue.Add(nil, out)
+	s.bytesInGroup = 0
 	return err
 }

@@ -5,129 +5,180 @@ import (
 	"fmt"
 	"github.com/dustin/go-humanize"
 	log2 "github.com/go-kit/log"
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
+	"github.com/grafana/alloy/internal/static/metrics/wal"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/model/labels"
-	"github.com/prometheus/prometheus/prompb"
 	"github.com/stretchr/testify/require"
+	"io/fs"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"testing"
 	"time"
 )
 
-const metricCount = 100_000
+type test struct {
+	name        string
+	metricCount int
+}
 
-func BenchmarkComplexCbor(b *testing.B) {
-	series := generateSeries(metricCount, 10)
-	totalBytes := 0
-	totalMemory := 0
-	for i := 0; i < b.N; i++ {
-		var m1, m2 runtime.MemStats
-		runtime.GC()
-		runtime.ReadMemStats(&m1)
-		q := &fq{}
-		wr := newCBORWrite(q, 32*1024*1024, 100*time.Millisecond, log2.NewNopLogger(), prometheus.DefaultRegisterer)
-		for _, j := range series {
-			err := wr.AddMetric(j.l, nil, j.t, j.v, nil, nil, types.Sample)
-			require.NoError(b, err)
-		}
-		err := wr.write()
-		require.NoError(b, err)
-		totalBytes += q.totalBytes
-		runtime.ReadMemStats(&m2)
-		totalMemory = int(m2.HeapInuse - m1.HeapInuse)
-	}
-	b.Log("bytes written", humanize.Bytes(uint64(totalBytes)))
-	b.Log("bytes written per run", humanize.Bytes(uint64(totalBytes/b.N)))
-	b.Log("memory used per run", humanize.Bytes(uint64(totalMemory/b.N)))
-
+var tests = []test{
+	{
+		name:        "1_000",
+		metricCount: 1_000,
+	},
+	{
+		name:        "10_000",
+		metricCount: 10_000,
+	},
+	{
+		name:        "100_000",
+		metricCount: 100_000,
+	},
+	{
+		name:        "500_000",
+		metricCount: 500_000,
+	},
+	{
+		name:        "1_000_000",
+		metricCount: 1_000_000,
+	},
+	/*{
+		name:        "10_000_000",
+		metricCount: 10_000_000,
+	},*/
 }
 
 func BenchmarkSimpleCbor(b *testing.B) {
-	series := generatePromPB(metricCount, 10)
-	totalBytes := 0
-	totalMemory := 0
-	for i := 0; i < b.N; i++ {
-		var m1, m2 runtime.MemStats
-		runtime.GC()
-		runtime.ReadMemStats(&m1)
-		q := &fq{}
-		wr, err := NewSerializer(32*1024*1024, 100*time.Millisecond, q)
-		require.NoError(b, err)
-		raw := make([]*Raw, 0)
-		for _, j := range series {
-			buf, err := j.Marshal()
-			require.NoError(b, err)
-			r := &Raw{
-				Hash:  rand.Uint64(),
-				Bytes: buf,
-				Ts:    j.Samples[0].Timestamp,
+	for _, t := range tests {
+		b.Run(t.name, func(b *testing.B) {
+			totalBytes := 0
+			totalMemory := 0
+			for i := 0; i < b.N; i++ {
+				var m1, m2 runtime.MemStats
+				runtime.GC()
+				runtime.ReadMemStats(&m1)
+				q := &fq{}
+				l := log2.NewNopLogger()
+				wr, err := NewSerializer(32*1024*1024, 500*time.Millisecond, q, l)
+				require.NoError(b, err)
+				app := NewAppender(1*time.Minute, wr, 100, l)
+				tSeries := &ts{
+					v: 0,
+					t: 0,
+					l: labels.EmptyLabels(),
+				}
+				g := generate{
+					metricCount: t.metricCount,
+					labelCount:  10,
+					current:     0,
+				}
+				var keep bool
+				for {
+					tSeries, keep = g.nextSeries(tSeries)
+					if !keep {
+						break
+					}
+					_, err = app.Append(0, tSeries.l, tSeries.t, tSeries.v)
+					require.NoError(b, err)
+				}
+				_ = app.Commit()
+				totalBytes += q.totalBytes
+				runtime.ReadMemStats(&m2)
+				totalMemory = int(m2.HeapInuse - m1.HeapInuse)
 			}
-			require.NoError(b, err)
-			raw = append(raw, r)
-		}
-		err = wr.Append(raw)
-		require.NoError(b, err)
-		totalBytes += q.totalBytes
-		runtime.ReadMemStats(&m2)
-		totalMemory = int(m2.HeapInuse - m1.HeapInuse)
+			b.Log("bytes written", humanize.Bytes(uint64(totalBytes)))
+			b.Log("bytes written per run", humanize.Bytes(uint64(totalBytes/b.N)), "metric count", t.metricCount)
+			b.Log("memory used per run", humanize.Bytes(uint64(totalMemory/b.N)))
+		})
 	}
-	b.Log("bytes written", humanize.Bytes(uint64(totalBytes)))
-	b.Log("bytes written per run", humanize.Bytes(uint64(totalBytes/b.N)))
-	b.Log("memory used per run", humanize.Bytes(uint64(totalMemory/b.N)))
 
 }
 
-func generateSeries(metricCount, labelCount int) []ts {
-	series := make([]ts, metricCount)
-	for i := 0; i < metricCount; i++ {
-		timeseries := ts{
-			v: rand.Float64(),
-			t: time.Now().UTC().Unix(),
-			l: labels.EmptyLabels(),
-		}
-		timeseries.l = append(timeseries.l, labels.Label{
-			Name:  "__name__",
-			Value: strconv.Itoa(i),
+func BenchmarkTSDB(b *testing.B) {
+	for _, t := range tests {
+		b.Run(t.name, func(b *testing.B) {
+			totalBytes := 0
+			totalMemory := 0
+			for i := 0; i < b.N; i++ {
+				var m1, m2 runtime.MemStats
+				runtime.GC()
+				runtime.ReadMemStats(&m1)
+				l := log2.NewNopLogger()
+				dir := b.TempDir()
+				store, err := wal.NewStorage(l, prometheus.NewRegistry(), dir)
+				require.NoError(b, err)
+				app := store.Appender(context.Background())
+				tSeries := &ts{
+					v: 0,
+					t: 0,
+					l: labels.EmptyLabels(),
+				}
+				g := generate{
+					metricCount: t.metricCount,
+					labelCount:  10,
+					current:     0,
+				}
+				var keep bool
+				for {
+					tSeries, keep = g.nextSeries(tSeries)
+					if !keep {
+						break
+					}
+					_, err = app.Append(0, tSeries.l, tSeries.t, tSeries.v)
+					require.NoError(b, err)
+				}
+				err = app.Commit()
+				require.NoError(b, err)
+				filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+					if d.IsDir() {
+						return nil
+					}
+					f, serr := os.Stat(path)
+					require.NoError(b, serr)
+					totalBytes += int(f.Size())
+					return nil
+				})
+				runtime.ReadMemStats(&m2)
+				totalMemory = int(m2.HeapInuse - m1.HeapInuse)
+				b.Log("bytes written per metric", humanize.Bytes(uint64(totalBytes/t.metricCount)))
+			}
+			b.Log("bytes written", humanize.Bytes(uint64(totalBytes)))
+			b.Log("bytes written per run", humanize.Bytes(uint64(totalBytes/b.N)), "metric count", t.metricCount)
+			b.Log("memory used per run", humanize.Bytes(uint64(totalMemory/b.N)))
 		})
-		for j := 0; j < labelCount; j++ {
-			timeseries.l = append(timeseries.l, labels.Label{
-				Name:  fmt.Sprintf("name_%d", j),
-				Value: fmt.Sprintf("value_%d", rand.Intn(20)),
-			})
-		}
-		series[i] = timeseries
 	}
-	return series
 }
 
-func generatePromPB(metricCount, labelCount int) []prompb.TimeSeries {
-	series := make([]prompb.TimeSeries, metricCount)
-	for i := 0; i < metricCount; i++ {
-		timeseries := prompb.TimeSeries{
-			Samples: make([]prompb.Sample, 0),
-			Labels:  make([]prompb.Label, 0),
-		}
+type generate struct {
+	metricCount int
+	labelCount  int
+	current     int
+}
 
-		timeseries.Samples = append(timeseries.Samples, prompb.Sample{
-			Value:     rand.Float64(),
-			Timestamp: time.Now().UTC().Unix(),
-		})
-		timeseries.Labels = append(timeseries.Labels, prompb.Label{
-			Name:  "__name__",
-			Value: strconv.Itoa(i),
-		})
-		for j := 0; j < labelCount; j++ {
-			timeseries.Labels = append(timeseries.Labels, prompb.Label{
-				Name:  fmt.Sprintf("name_%d", j),
-				Value: fmt.Sprintf("value_%d", j),
-			})
-		}
-		series[i] = timeseries
+func (g *generate) nextSeries(tSeries *ts) (*ts, bool) {
+	if g.current == g.metricCount {
+		return nil, false
 	}
-	return series
+	tSeries.l = tSeries.l[:0]
+	tSeries.v = rand.Float64()
+	tSeries.t = time.Now().UTC().Unix()
+	tSeries.l = tSeries.l[:0]
+
+	tSeries.l = append(tSeries.l, labels.Label{
+		Name:  "__name__",
+		Value: strconv.Itoa(g.current),
+	})
+	for j := 0; j < g.labelCount; j++ {
+		tSeries.l = append(tSeries.l, labels.Label{
+			Name:  fmt.Sprintf("name_%d", j),
+			Value: fmt.Sprintf("value_%d", rand.Intn(20)),
+		})
+	}
+	g.current++
+	return tSeries, true
 }
 
 type ts struct {
@@ -140,11 +191,14 @@ type fq struct {
 	totalBytes int
 }
 
-func (f *fq) Add(data []byte) (string, error) {
+func (f *fq) Add(_ map[string]string, data []byte) (string, error) {
 	f.totalBytes = f.totalBytes + len(data)
 	return "ok", nil
 }
 
-func (f fq) Next(ctx context.Context, enc []byte) ([]byte, string, error) {
-	return nil, "", nil
+func (f fq) Next(ctx context.Context, enc []byte) (map[string]string, []byte, string, error) {
+	return nil, nil, "", nil
+}
+
+func (f fq) Delete(_ string) {
 }

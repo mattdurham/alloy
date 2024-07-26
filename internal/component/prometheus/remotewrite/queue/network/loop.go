@@ -1,4 +1,4 @@
-package networkqueue
+package network
 
 import (
 	"bufio"
@@ -8,35 +8,49 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/grafana/alloy/internal/alloy/logging/level"
+	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 	"github.com/prometheus/prometheus/prompb"
+	"go.uber.org/atomic"
 	"golang.design/x/chann"
 )
 
+// loop handles the low level sending of data. It conceptually a queue.
 type loop struct {
-	mut        sync.RWMutex
 	client     *http.Client
 	batchCount int
 	flushTimer time.Duration
 	cfg        ConnectionConfig
-	pbuf       *proto.Buffer
-	buf        []byte
 	log        log.Logger
+	pbuf       *proto.Buffer
 	lastSend   time.Time
-	ch         *chann.Chann[[]byte]
+	buf        []byte
+	ch         *chann.Chann[*types.Item]
 	seriesBuf  []prompb.TimeSeries
+	statsFunc  func(s Stats)
+	stopCh     chan struct{}
+	stopCalled atomic.Bool
+}
+
+type Stats struct {
+	SeriesSent   int
+	Fails        int
+	Retries      int
+	Retry429     int
+	Retry5XX     int
+	SendDuration time.Duration
 }
 
 func (l *loop) runLoop(ctx context.Context) {
-	series := make([][]byte, 0)
+	series := make([]*types.Item, 0)
 	for {
-		checkTime := time.NewTimer(5 * time.Second)
+		// This mainly exists so a very low flush time does not steal the select from reading from the out channel.
+		checkTime := time.NewTimer(1 * time.Second)
 		select {
 		case <-ctx.Done():
 			return
@@ -54,37 +68,66 @@ func (l *loop) runLoop(ctx context.Context) {
 				l.trySend(series)
 				series = series[:0]
 			}
+		case <-l.stopCh:
+			return
 		}
 	}
 }
 
-func (l *loop) Push(ctx context.Context, buf []byte) bool {
+// Push will push to the channel, it will block until it is able to or the context finishes.
+func (l *loop) Push(ctx context.Context, d *types.Item) bool {
 	select {
-	case l.ch.In() <- buf:
+	case l.ch.In() <- d:
 		return true
 	case <-ctx.Done():
+		return false
+	case <-l.stopCh:
 		return false
 	}
 }
 
-func (l *loop) trySend(series [][]byte) {
+func (l *loop) drain(ctx context.Context) []*types.Item {
+	items := make([]*types.Item, 0)
+	for {
+		select {
+		case item := <-l.ch.Out():
+			items = append(items, item)
+		case <-ctx.Done():
+			return items
+		}
+	}
+}
+
+// trySend is the core functionality for sending data to a endpoint. It will attempt retries as defined in MaxRetryBackoffAttempts.
+func (l *loop) trySend(series []*types.Item) {
 	attempts := 0
 attempt:
 	level.Debug(l.log).Log("msg", "sending data", "attempts", attempts, "len", len(series))
+	start := time.Now()
 	result := l.send(series, attempts)
+	duration := time.Since(start)
+	l.statsFunc(Stats{
+		SendDuration: duration,
+	})
 	level.Debug(l.log).Log("msg", "sending data result", "attempts", attempts, "successful", result.successful, "err", result.err)
 	if result.successful {
-		l.resetSeries()
+		l.finishSending()
 		return
 	}
 	if !result.recoverableError {
-		l.resetSeries()
+		l.finishSending()
 		return
 	}
 	attempts++
 	if attempts > int(l.cfg.MaxRetryBackoffAttempts) && l.cfg.MaxRetryBackoffAttempts > 0 {
 		level.Debug(l.log).Log("msg", "max attempts reached", "attempts", attempts)
-		l.resetSeries()
+		l.finishSending()
+		return
+	}
+	l.statsFunc(Stats{
+		Retries: 1,
+	})
+	if l.stopCalled.Load() {
 		return
 	}
 	goto attempt
@@ -97,17 +140,17 @@ type sendResult struct {
 	retryAfter       time.Duration
 }
 
-func (l *loop) resetSeries() {
+func (l *loop) finishSending() {
 	l.lastSend = time.Now()
 }
 
-func (l *loop) send(series [][]byte, retryCount int) sendResult {
+func (l *loop) send(series []*types.Item, retryCount int) sendResult {
 	result := sendResult{}
 	l.pbuf.Reset()
 	l.seriesBuf = l.seriesBuf[:0]
 	for _, tsBuf := range series {
 		ts := prompb.TimeSeries{}
-		err := proto.Unmarshal(tsBuf, &ts)
+		err := proto.Unmarshal(tsBuf.Bytes, &ts)
 		if err != nil {
 			continue
 		}
@@ -146,21 +189,37 @@ func (l *loop) send(series [][]byte, retryCount int) sendResult {
 		result.recoverableError = true
 		return result
 	}
+	// 500 errors are considered recoverable.
 	if resp.StatusCode/100 == 5 || resp.StatusCode == http.StatusTooManyRequests {
+		if resp.StatusCode == http.StatusTooManyRequests {
+			l.statsFunc(Stats{
+				Retry429: 1,
+			})
+		} else {
+			l.statsFunc(Stats{
+				Retry5XX: 1,
+			})
+		}
 		result.retryAfter = retryAfterDuration(resp.Header.Get("Retry-After"))
 		result.recoverableError = true
 		return result
 	}
+	// Status Codes that are not 500 or 200 are not recoverable and dropped.
 	if resp.StatusCode/100 != 2 {
 		scanner := bufio.NewScanner(io.LimitReader(resp.Body, 1_000))
 		line := ""
 		if scanner.Scan() {
 			line = scanner.Text()
 		}
+		l.statsFunc(Stats{
+			Fails: 1,
+		})
 		result.err = fmt.Errorf("server returned HTTP status %s: %s", resp.Status, line)
 		return result
-
 	}
+	l.statsFunc(Stats{
+		SeriesSent: len(series),
+	})
 
 	result.successful = true
 	return result

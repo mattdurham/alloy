@@ -1,38 +1,37 @@
-package queue
+package cbor
 
 import (
 	"fmt"
-	"github.com/go-kit/log"
-	"github.com/grafana/alloy/internal/alloy/logging/level"
-	"github.com/prometheus/prometheus/prompb"
-	"github.com/prometheus/prometheus/storage/remote"
 	"time"
 
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/cbor"
+	"github.com/go-kit/log"
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
+	"github.com/prometheus/prometheus/prompb"
 	"github.com/prometheus/prometheus/storage"
+	"github.com/prometheus/prometheus/storage/remote"
 )
 
 type appender struct {
-	parent   *Queue
-	ttl      time.Duration
-	s        *cbor.Serializer
-	ts       *prompb.TimeSeries
-	data     []*cbor.Raw
-	metadata []*cbor.Raw
-	logger   log.Logger
+	ttl       time.Duration
+	s         *Serializer
+	ts        *prompb.TimeSeries
+	data      []*Raw
+	metadata  []*Raw
+	logger    log.Logger
+	batchSize int
 }
 
-func newAppender(parent *Queue, ttl time.Duration, s *cbor.Serializer, logger log.Logger) *appender {
+// NewAppender returns an Appender that writes to a given serializer. NOTE the Appender returned writes
+// data immedietly and does not honor commit or rollback.
+func NewAppender(ttl time.Duration, s *Serializer, batchSize int, logger log.Logger) storage.Appender {
 	app := &appender{
-		parent:   parent,
 		ttl:      ttl,
 		s:        s,
-		data:     make([]*cbor.Raw, 0),
-		metadata: make([]*cbor.Raw, 0),
+		data:     make([]*Raw, 0),
+		metadata: make([]*Raw, 0),
 		logger:   logger,
 		ts: &prompb.TimeSeries{
 			Labels:     make([]prompb.Label, 0),
@@ -40,16 +39,19 @@ func newAppender(parent *Queue, ttl time.Duration, s *cbor.Serializer, logger lo
 			Exemplars:  make([]prompb.Exemplar, 0),
 			Histograms: make([]prompb.Histogram, 0),
 		},
+		batchSize: batchSize,
 	}
 	return app
 }
 
 // Append metric
 func (a *appender) Append(ref storage.SeriesRef, l labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
+	// Check to see if the TTL has expired for this record.
 	endTime := time.Now().UTC().Unix() - int64(a.ttl.Seconds())
 	if t < endTime {
 		return ref, nil
 	}
+
 	for _, l := range l {
 		a.ts.Labels = append(a.ts.Labels, prompb.Label{
 			Name:  l.Name,
@@ -65,27 +67,35 @@ func (a *appender) Append(ref storage.SeriesRef, l labels.Labels, t int64, v flo
 		return ref, err
 	}
 	hash := l.Hash()
-	a.data = append(a.data, &cbor.Raw{
+	a.data = append(a.data, &Raw{
 		Hash:  hash,
-		Ts:    t,
+		TS:    t,
 		Bytes: data,
 	})
+	// Finally if we have enough data in the batch then send it to the serializer.
+	// Originally we fed it each entry but there was some mutex overhead in highly concurrent scraping
+	// Batching solved that problem, a batch size of 100 is enough.
+	if len(a.data) >= a.batchSize {
+		err = a.s.Append(a.data)
+		if err != nil {
+			return ref, err
+		}
+		a.data = a.data[:0]
+	}
 	a.resetTS()
 	return ref, nil
 }
 
 // Commit is a no op since we always write.
 func (a *appender) Commit() (_ error) {
-	level.Debug(a.logger).Log("msg", "committing series to serializer", "len", len(a.data))
 	err := a.s.Append(a.data)
 	if err != nil {
 		return err
 	}
-	level.Debug(a.logger).Log("msg", "committing metadata to serializer", "len", len(a.data))
 	return a.s.AppendMetadata(a.metadata)
 }
 
-// Rollback is a no op.
+// Rollback is a no op since we write all the data.
 func (a *appender) Rollback() error {
 	return nil
 }
@@ -111,9 +121,9 @@ func (a *appender) AppendExemplar(ref storage.SeriesRef, l labels.Labels, e exem
 		return ref, err
 	}
 	hash := l.Hash()
-	a.data = append(a.data, &cbor.Raw{
+	a.data = append(a.data, &Raw{
 		Hash:  hash,
-		Ts:    ex.Timestamp,
+		TS:    ex.Timestamp,
 		Bytes: data,
 	})
 	return ref, nil
@@ -141,9 +151,9 @@ func (a *appender) AppendHistogram(ref storage.SeriesRef, l labels.Labels, t int
 		return ref, err
 	}
 	hash := l.Hash()
-	a.data = append(a.data, &cbor.Raw{
+	a.data = append(a.data, &Raw{
 		Hash:  hash,
-		Ts:    t,
+		TS:    t,
 		Bytes: data,
 	})
 	a.resetTS()
@@ -172,9 +182,9 @@ func (a *appender) UpdateMetadata(ref storage.SeriesRef, l labels.Labels, m meta
 	if err != nil {
 		return ref, err
 	}
-	a.data = append(a.data, &cbor.Raw{
+	a.data = append(a.data, &Raw{
 		Hash:  l.Hash(),
-		Ts:    0,
+		TS:    0,
 		Bytes: data,
 	})
 	return ref, nil
