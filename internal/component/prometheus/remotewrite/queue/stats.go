@@ -10,7 +10,7 @@ type Stats struct {
 	Failures     prometheus.Counter
 	Retries      prometheus.Counter
 	Retries429   prometheus.Counter
-	Retry5XX     prometheus.Counter
+	Retries5XX   prometheus.Counter
 	SentDuration prometheus.Histogram
 	Errors       prometheus.Counter
 }
