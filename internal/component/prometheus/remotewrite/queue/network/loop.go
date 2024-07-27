@@ -38,12 +38,12 @@ type loop struct {
 }
 
 type Stats struct {
-	SeriesSent   int
-	Fails        int
-	Retries      int
-	Retry429     int
-	Retry5XX     int
-	SendDuration time.Duration
+	SeriesSent          int
+	Fails               int
+	Retries             int
+	Retries429          int
+	Retries5XX          int
+	SendDurationSeconds time.Duration
 }
 
 func (l *loop) runLoop(ctx context.Context) {
@@ -107,7 +107,7 @@ attempt:
 	result := l.send(series, attempts)
 	duration := time.Since(start)
 	l.statsFunc(Stats{
-		SendDuration: duration,
+		SendDurationSeconds: duration,
 	})
 	level.Debug(l.log).Log("msg", "sending data result", "attempts", attempts, "successful", result.successful, "err", result.err)
 	if result.successful {
@@ -193,11 +193,11 @@ func (l *loop) send(series []*types.Item, retryCount int) sendResult {
 	if resp.StatusCode/100 == 5 || resp.StatusCode == http.StatusTooManyRequests {
 		if resp.StatusCode == http.StatusTooManyRequests {
 			l.statsFunc(Stats{
-				Retry429: 1,
+				Retries429: 1,
 			})
 		} else {
 			l.statsFunc(Stats{
-				Retry5XX: 1,
+				Retries5XX: 1,
 			})
 		}
 		result.retryAfter = retryAfterDuration(resp.Header.Get("Retry-After"))
