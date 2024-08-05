@@ -9,4 +9,5 @@ type Storage interface {
 	// Returns a map of tags that were passed in, data, name, and an error.
 	// Then deletes the underlying file.
 	Next(ctx context.Context, enc []byte) (map[string]string, []byte, string, error)
+	Close()
 }

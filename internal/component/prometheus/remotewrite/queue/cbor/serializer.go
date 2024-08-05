@@ -63,6 +63,10 @@ func NewSerializer(maxSizeBytes int, flushDuration time.Duration, q filequeue.St
 }
 
 func (s *Serializer) AppendMetadata(data []*Raw) error {
+	if len(data) == 0 {
+		return nil
+	}
+
 	s.mut.Lock()
 	defer s.mut.Unlock()
 
@@ -99,6 +103,14 @@ func (s *Serializer) Append(data []*Raw) error {
 		return s.store()
 	}
 	return nil
+}
+
+func (s *Serializer) Update(flushDuration time.Duration, batchBytes int) {
+	s.mut.Lock()
+	defer s.mut.Unlock()
+
+	s.flushDuration = flushDuration
+	s.maxSizeBytes = batchBytes
 }
 
 func (s *Serializer) store() error {

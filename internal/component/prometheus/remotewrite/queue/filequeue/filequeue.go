@@ -119,6 +119,10 @@ func (q *queue) Next(ctx context.Context, enc []byte) (map[string]string, []byte
 	}
 }
 
+func (q *queue) Close() {
+	q.ch.Close()
+}
+
 func (q *queue) delete(name string) {
 	_ = os.Remove(name)
 }

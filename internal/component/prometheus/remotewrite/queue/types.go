@@ -2,6 +2,7 @@ package queue
 
 import (
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/prometheus/prometheus/storage"
@@ -11,7 +12,7 @@ func defaultArgs() Arguments {
 	return Arguments{
 		TTL:               2 * time.Hour,
 		BatchSizeBytes:    32 * 1024 * 1024,
-		FlushTime:         5 * time.Second,
+		FlushDuration:     5 * time.Second,
 		AppenderBatchSize: 1_000,
 		Connection: ConnectionConfig{
 			Timeout:                 15 * time.Second,
@@ -30,10 +31,27 @@ type Arguments struct {
 	// The batch size to persist to the file queue.
 	BatchSizeBytes int `alloy:"batch_size_bytes,attr,optional"`
 	// How often to flush to the file queue if BatchSizeBytes isn't met.
-	FlushTime  time.Duration    `alloy:"flush_time,attr,optional"`
-	Connection ConnectionConfig `alloy:"endpoint,block"`
+	FlushDuration time.Duration    `alloy:"flush_duration,attr,optional"`
+	Connection    ConnectionConfig `alloy:"endpoint,block"`
 	// AppenderBatchSize determines how often to flush the appender batch size.
 	AppenderBatchSize int `alloy:"appender_batch_size,attr,optional"`
+}
+
+func (a Arguments) triggerSerializationChange(b Arguments) bool {
+	if a.TTL != b.TTL {
+		return true
+	}
+	if a.BatchSizeBytes != b.BatchSizeBytes {
+		return true
+	}
+	if a.FlushDuration != b.FlushDuration {
+		return true
+	}
+	return true
+}
+
+func (a Arguments) triggerWriteClientChange(b Arguments) bool {
+	return reflect.DeepEqual(a.Connection, b.Connection)
 }
 
 type ConnectionConfig struct {

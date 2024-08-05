@@ -14,7 +14,6 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/grafana/alloy/internal/alloy/logging/level"
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 	"github.com/prometheus/prometheus/prompb"
 	"go.uber.org/atomic"
 	"golang.design/x/chann"
@@ -30,7 +29,7 @@ type loop struct {
 	pbuf       *proto.Buffer
 	lastSend   time.Time
 	buf        []byte
-	ch         *chann.Chann[*types.Item]
+	ch         *chann.Chann[[]byte]
 	seriesBuf  []prompb.TimeSeries
 	statsFunc  func(s Stats)
 	stopCh     chan struct{}
@@ -38,16 +37,16 @@ type loop struct {
 }
 
 type Stats struct {
-	SeriesSent          int
-	Fails               int
-	Retries             int
-	Retries429          int
-	Retries5XX          int
-	SendDurationSeconds time.Duration
+	SeriesSent   int
+	Fails        int
+	Retries      int
+	Retries429   int
+	Retries5XX   int
+	SendDuration time.Duration
 }
 
 func (l *loop) runLoop(ctx context.Context) {
-	series := make([]*types.Item, 0)
+	series := make([][]byte, 0)
 	for {
 		// This mainly exists so a very low flush time does not steal the select from reading from the out channel.
 		checkTime := time.NewTimer(1 * time.Second)
@@ -75,7 +74,7 @@ func (l *loop) runLoop(ctx context.Context) {
 }
 
 // Push will push to the channel, it will block until it is able to or the context finishes.
-func (l *loop) Push(ctx context.Context, d *types.Item) bool {
+func (l *loop) Push(ctx context.Context, d []byte) bool {
 	select {
 	case l.ch.In() <- d:
 		return true
@@ -86,20 +85,8 @@ func (l *loop) Push(ctx context.Context, d *types.Item) bool {
 	}
 }
 
-func (l *loop) drain(ctx context.Context) []*types.Item {
-	items := make([]*types.Item, 0)
-	for {
-		select {
-		case item := <-l.ch.Out():
-			items = append(items, item)
-		case <-ctx.Done():
-			return items
-		}
-	}
-}
-
 // trySend is the core functionality for sending data to a endpoint. It will attempt retries as defined in MaxRetryBackoffAttempts.
-func (l *loop) trySend(series []*types.Item) {
+func (l *loop) trySend(series [][]byte) {
 	attempts := 0
 attempt:
 	level.Debug(l.log).Log("msg", "sending data", "attempts", attempts, "len", len(series))
@@ -107,7 +94,7 @@ attempt:
 	result := l.send(series, attempts)
 	duration := time.Since(start)
 	l.statsFunc(Stats{
-		SendDurationSeconds: duration,
+		SendDuration: duration,
 	})
 	level.Debug(l.log).Log("msg", "sending data result", "attempts", attempts, "successful", result.successful, "err", result.err)
 	if result.successful {
@@ -144,13 +131,13 @@ func (l *loop) finishSending() {
 	l.lastSend = time.Now()
 }
 
-func (l *loop) send(series []*types.Item, retryCount int) sendResult {
+func (l *loop) send(series [][]byte, retryCount int) sendResult {
 	result := sendResult{}
 	l.pbuf.Reset()
 	l.seriesBuf = l.seriesBuf[:0]
 	for _, tsBuf := range series {
 		ts := prompb.TimeSeries{}
-		err := proto.Unmarshal(tsBuf.Bytes, &ts)
+		err := proto.Unmarshal(tsBuf, &ts)
 		if err != nil {
 			continue
 		}

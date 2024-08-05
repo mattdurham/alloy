@@ -54,7 +54,7 @@ func New(ctx context.Context, cc ConnectionConfig, connectionCount uint64, logge
 			buf:        make([]byte, 0),
 			log:        logger,
 			// We create this with double the batch so that we can always be feeding the queue.
-			ch:        chann.New[*types.Item](chann.Cap(cc.BatchCount * 2)),
+			ch:        chann.New[[]byte](chann.Cap(cc.BatchCount * 2)),
 			seriesBuf: make([]prompb.TimeSeries, 0),
 			statsFunc: seriesStats,
 		}
@@ -70,45 +70,28 @@ func New(ctx context.Context, cc ConnectionConfig, connectionCount uint64, logge
 		buf:        make([]byte, 0),
 		log:        logger,
 		// We create this with double the batch so that we can always be feeding the queue.
-		ch:        chann.New[*types.Item](chann.Cap(cc.BatchCount * 2)),
+		ch:        chann.New[[]byte](chann.Cap(cc.BatchCount * 2)),
 		seriesBuf: make([]prompb.TimeSeries, 0),
 		statsFunc: metadataStats,
 	}
 	return s, nil
 }
 
-func (s *manager) Drain(ctx context.Context) []*types.Item {
-	result := make([]*types.Item, 0)
-	wg := sync.WaitGroup{}
-	wg.Add(len(s.loops) + 1)
-	mut := sync.Mutex{}
+func (s *manager) Stop() {
 	for _, l := range s.loops {
-		go func() {
-			l.stopCh <- struct{}{}
-			items := l.drain(ctx)
-			mut.Lock()
-			result = append(result, items...)
-			mut.Unlock()
-			wg.Done()
-
-		}()
+		l.stopCh <- struct{}{}
 	}
-	return result
-}
-func (s *manager) DrainMetadata(ctx context.Context) []*types.Item {
-	s.metadata.stopCh <- struct{}{}
-	return s.metadata.drain(ctx)
 }
 
 // Queue adds anything thats not metadata to the queue.
-func (s *manager) Queue(ctx context.Context, d *types.Item) bool {
+func (s *manager) Queue(ctx context.Context, hash uint64, d []byte) bool {
 	// Based on a hash which is the label hash add to the queue.
-	queueNum := d.Hash % s.connectionCount
+	queueNum := hash % s.connectionCount
 
 	return s.loops[queueNum].Push(ctx, d)
 }
 
 // QueueMetadata adds metadata to the queue.
-func (s *manager) QueueMetadata(ctx context.Context, d *types.Item) bool {
+func (s *manager) QueueMetadata(ctx context.Context, d []byte) bool {
 	return s.metadata.Push(ctx, d)
 }

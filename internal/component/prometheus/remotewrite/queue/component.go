@@ -35,7 +35,7 @@ func NewComponent(opts component.Options, args Arguments) (*Queue, error) {
 	if err != nil {
 		return nil, err
 	}
-	serial, err := cbor.NewSerializer(args.BatchSizeBytes, args.FlushTime, fq, opts.Logger)
+	serial, err := cbor.NewSerializer(args.BatchSizeBytes, args.FlushDuration, fq, opts.Logger)
 	if err != nil {
 		return nil, err
 	}
@@ -60,12 +60,18 @@ type Queue struct {
 	fq         filequeue.Storage
 	client     types.WriteClient
 	log        log.Logger
+	stat       *Stats
+	metaStats  *Stats
+	ctx        context.Context
 }
 
 // Run starts the component, blocking until ctx is canceled or the component
 // suffers a fatal error. Run is guaranteed to be called exactly once per
 // Component.
 func (s *Queue) Run(ctx context.Context) error {
+	defer s.fq.Close()
+	stats := NewStats("alloy", "queue_series", s.opts.Registerer)
+	meta := NewStats("alloy", "queue_metadata", s.opts.Registerer)
 	client, err := network.New(ctx, network.ConnectionConfig{
 		URL:           s.args.Connection.URL,
 		Username:      s.args.Connection.BasicAuth.Username,
@@ -73,21 +79,18 @@ func (s *Queue) Run(ctx context.Context) error {
 		BatchCount:    s.args.Connection.BatchCount,
 		FlushDuration: s.args.Connection.FlushDuration,
 		Timeout:       s.args.Connection.Timeout,
-		UserAgent:     "alloy-dev",
-	}, uint64(s.args.Connection.QueueCount), s.log)
+		UserAgent:     "alloy",
+	}, uint64(s.args.Connection.QueueCount), s.log, stats.update, meta.update)
 	if err != nil {
 		return err
 	}
+	s.stat = stats
+	s.metaStats = meta
 	s.client = client
+	s.ctx = ctx
 	go s.runloop(ctx)
 	<-ctx.Done()
 	return nil
-}
-
-func (s *Queue) Update(args ConnectionConfig) {
-	// This needs to drain stop the loop then apply the configuration.
-	// In the case its unable to drain in a certain timeframe it should drop
-	// the loops.
 }
 
 func (s *Queue) runloop(ctx context.Context) {
@@ -96,9 +99,6 @@ func (s *Queue) runloop(ctx context.Context) {
 	var err error
 	for {
 		_, buf, name, err = s.fq.Next(ctx, buf)
-		// When we successfully grab the data then we need to delete it.
-		// Even if we fail deserializing it then we should still delete it.
-		s.fq.Delete(name)
 		if err != nil {
 			level.Error(s.log).Log("msg", "error getting next file", "err", err)
 		}
@@ -113,27 +113,31 @@ func (s *Queue) runloop(ctx context.Context) {
 			level.Debug(s.log).Log("msg", "error deserializing", "name", name, "err", err)
 			continue
 		}
-		for _, series := range sg.Series {
-			// One last chance to check the TTL. Writing to the filequeue will check it but
-			// in a situation where the network is down and writing backs up we dont want to send
-			// data that will get rejected.
-			old := time.Since(time.Unix(series.TS, 0))
-			if old > s.args.TTL {
-				continue
-			}
-			// This should really return a channel that lets you know when it can queue more.
-			successful := s.client.Queue(ctx, series.Hash, series.Bytes)
-			if !successful {
-				return
-			}
+		func() {
+			s.mut.RLock()
+			defer s.mut.RUnlock()
 
-		}
-		for _, md := range sg.Metadata {
-			successful := s.client.QueueMetadata(ctx, md.Bytes)
-			if !successful {
-				return
+			for _, series := range sg.Series {
+				// One last chance to check the TTL. Writing to the filequeue will check it but
+				// in a situation where the network is down and writing backs up we dont want to send
+				// data that will get rejected.
+				old := time.Since(time.Unix(series.TS, 0))
+				if old > s.args.TTL {
+					continue
+				}
+				successful := s.client.Queue(ctx, series.Hash, series.Bytes)
+				if !successful {
+					return
+				}
+
 			}
-		}
+			for _, md := range sg.Metadata {
+				successful := s.client.QueueMetadata(ctx, md.Bytes)
+				if !successful {
+					return
+				}
+			}
+		}()
 	}
 }
 
@@ -148,9 +152,36 @@ func (s *Queue) Update(args component.Arguments) error {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 
-	//TODO @mattdurham, we need to propagate args down to the child items.
-	s.args = args.(Arguments)
-	s.opts.OnStateChange(Exports{Receiver: s})
+	newArgs := args.(Arguments)
+	sync.OnceFunc(func() {
+		s.opts.OnStateChange(Exports{Receiver: s})
+	})
+	if s.client == nil {
+		s.args = newArgs
+		return nil
+	}
+	if s.args.triggerSerializationChange(newArgs) {
+		s.serializer.Update(newArgs.FlushDuration, newArgs.BatchSizeBytes)
+	}
+	if s.args.triggerWriteClientChange(newArgs) {
+		// Send stop to all channels adn rebuild.
+		s.client.Stop()
+		client, err := network.New(s.ctx, network.ConnectionConfig{
+			URL:           s.args.Connection.URL,
+			Username:      s.args.Connection.BasicAuth.Username,
+			Password:      s.args.Connection.BasicAuth.Password,
+			BatchCount:    s.args.Connection.BatchCount,
+			FlushDuration: s.args.Connection.FlushDuration,
+			Timeout:       s.args.Connection.Timeout,
+			UserAgent:     "alloy",
+		}, uint64(s.args.Connection.QueueCount), s.log, s.stat.update, s.metaStats.update)
+		if err != nil {
+			return err
+		}
+		s.client = client
+
+	}
+	s.args = newArgs
 
 	return nil
 }

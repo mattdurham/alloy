@@ -54,6 +54,7 @@ func NewStats(namespace, subsystem string, registry prometheus.Registerer) *Stat
 			Name:      "errors",
 		}),
 	}
+	registry.MustRegister(s.SentDuration, s.Retries5XX, s.Retries429, s.Retries, s.Failures, s.SeriesSent, s.Errors)
 	return s
 }
 
@@ -62,6 +63,6 @@ func (s *Stats) update(stats network.Stats) {
 	s.Retries.Add(float64(stats.Retries))
 	s.Failures.Add(float64(stats.Fails))
 	s.Retries429.Add(float64(stats.Retries429))
-	s.Retry5XX.Add(float64(stats.Retries5XX))
-	s.SentDuration.Observe(float64(stats.SendDurationSeconds))
+	s.Retries5XX.Add(float64(stats.Retries5XX))
+	s.SentDuration.Observe(float64(stats.SendDuration))
 }
