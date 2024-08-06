@@ -37,7 +37,7 @@ type Arguments struct {
 	AppenderBatchSize int `alloy:"appender_batch_size,attr,optional"`
 }
 
-func (a Arguments) triggerSerializationChange(b Arguments) bool {
+func (a Arguments) TriggerSerializationChange(b Arguments) bool {
 	if a.TTL != b.TTL {
 		return true
 	}
@@ -50,7 +50,7 @@ func (a Arguments) triggerSerializationChange(b Arguments) bool {
 	return true
 }
 
-func (a Arguments) triggerWriteClientChange(b Arguments) bool {
+func (a Arguments) TriggerWriteClientChange(b Arguments) bool {
 	return reflect.DeepEqual(a.Connection, b.Connection)
 }
 

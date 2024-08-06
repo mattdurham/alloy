@@ -1,11 +1,11 @@
 package types
 
 import (
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/network"
 	"github.com/prometheus/client_golang/prometheus"
+	"time"
 )
 
-type Stats struct {
+type PrometheusStats struct {
 	SeriesSent   prometheus.Counter
 	Failures     prometheus.Counter
 	Retries      prometheus.Counter
@@ -15,8 +15,8 @@ type Stats struct {
 	Errors       prometheus.Counter
 }
 
-func NewStats(namespace, subsystem string, registry prometheus.Registerer) *Stats {
-	s := &Stats{
+func NewStats(namespace, subsystem string, registry prometheus.Registerer) *PrometheusStats {
+	s := &PrometheusStats{
 		SeriesSent: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: subsystem,
@@ -58,11 +58,20 @@ func NewStats(namespace, subsystem string, registry prometheus.Registerer) *Stat
 	return s
 }
 
-func (s *Stats) update(stats network.Stats) {
+func (s *PrometheusStats) Update(stats Stats) {
 	s.SeriesSent.Add(float64(stats.SeriesSent))
 	s.Retries.Add(float64(stats.Retries))
 	s.Failures.Add(float64(stats.Fails))
 	s.Retries429.Add(float64(stats.Retries429))
 	s.Retries5XX.Add(float64(stats.Retries5XX))
 	s.SentDuration.Observe(float64(stats.SendDuration))
+}
+
+type Stats struct {
+	SeriesSent   int
+	Fails        int
+	Retries      int
+	Retries429   int
+	Retries5XX   int
+	SendDuration time.Duration
 }

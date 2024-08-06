@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 	"io"
 	"net/http"
 	"strconv"
@@ -31,18 +32,9 @@ type loop struct {
 	buf        []byte
 	ch         *chann.Chann[[]byte]
 	seriesBuf  []prompb.TimeSeries
-	statsFunc  func(s Stats)
+	statsFunc  func(s types.Stats)
 	stopCh     chan struct{}
 	stopCalled atomic.Bool
-}
-
-type Stats struct {
-	SeriesSent   int
-	Fails        int
-	Retries      int
-	Retries429   int
-	Retries5XX   int
-	SendDuration time.Duration
 }
 
 func (l *loop) runLoop(ctx context.Context) {
@@ -93,7 +85,7 @@ attempt:
 	start := time.Now()
 	result := l.send(series, attempts)
 	duration := time.Since(start)
-	l.statsFunc(Stats{
+	l.statsFunc(types.Stats{
 		SendDuration: duration,
 	})
 	level.Debug(l.log).Log("msg", "sending data result", "attempts", attempts, "successful", result.successful, "err", result.err)
@@ -111,7 +103,7 @@ attempt:
 		l.finishSending()
 		return
 	}
-	l.statsFunc(Stats{
+	l.statsFunc(types.Stats{
 		Retries: 1,
 	})
 	if l.stopCalled.Load() {
@@ -161,6 +153,7 @@ func (l *loop) send(series [][]byte, retryCount int) sendResult {
 	httpReq.Header.Add("Content-Encoding", "snappy")
 	httpReq.Header.Set("Content-Type", "application/x-protobuf")
 	httpReq.Header.Set("User-Agent", l.cfg.UserAgent)
+	httpReq.Header.Set("X-Prometheus-Remote-Write-Version", "0.1.0")
 	httpReq.SetBasicAuth(l.cfg.Username, l.cfg.Password)
 
 	if retryCount > 0 {
@@ -179,11 +172,11 @@ func (l *loop) send(series [][]byte, retryCount int) sendResult {
 	// 500 errors are considered recoverable.
 	if resp.StatusCode/100 == 5 || resp.StatusCode == http.StatusTooManyRequests {
 		if resp.StatusCode == http.StatusTooManyRequests {
-			l.statsFunc(Stats{
+			l.statsFunc(types.Stats{
 				Retries429: 1,
 			})
 		} else {
-			l.statsFunc(Stats{
+			l.statsFunc(types.Stats{
 				Retries5XX: 1,
 			})
 		}
@@ -198,13 +191,13 @@ func (l *loop) send(series [][]byte, retryCount int) sendResult {
 		if scanner.Scan() {
 			line = scanner.Text()
 		}
-		l.statsFunc(Stats{
+		l.statsFunc(types.Stats{
 			Fails: 1,
 		})
 		result.err = fmt.Errorf("server returned HTTP status %s: %s", resp.Status, line)
 		return result
 	}
-	l.statsFunc(Stats{
+	l.statsFunc(types.Stats{
 		SeriesSent: len(series),
 	})
 

@@ -60,8 +60,8 @@ type Queue struct {
 	fq         types.FileStorage
 	client     types.NetworkClient
 	log        log.Logger
-	stat       *types.Stats
-	metaStats  *types.Stats
+	stat       *types.PrometheusStats
+	metaStats  *types.PrometheusStats
 	ctx        context.Context
 }
 
@@ -80,7 +80,7 @@ func (s *Queue) Run(ctx context.Context) error {
 		FlushDuration: s.args.Connection.FlushDuration,
 		Timeout:       s.args.Connection.Timeout,
 		UserAgent:     "alloy",
-	}, uint64(s.args.Connection.QueueCount), s.log, stats.update, meta.update)
+	}, uint64(s.args.Connection.QueueCount), s.log, stats.Update, meta.Update)
 	if err != nil {
 		return err
 	}
@@ -160,11 +160,11 @@ func (s *Queue) Update(args component.Arguments) error {
 		s.args = newArgs
 		return nil
 	}
-	if s.args.triggerSerializationChange(newArgs) {
+	if s.args.TriggerSerializationChange(newArgs) {
 		s.serializer.Update(newArgs.FlushDuration, newArgs.BatchSizeBytes)
 	}
-	if s.args.triggerWriteClientChange(newArgs) {
-		// Send stop to all channels adn rebuild.
+	if s.args.TriggerWriteClientChange(newArgs) {
+		// Send stop to all channels and rebuild.
 		s.client.Stop()
 		client, err := network.New(s.ctx, network.ConnectionConfig{
 			URL:           s.args.Connection.URL,
@@ -174,15 +174,13 @@ func (s *Queue) Update(args component.Arguments) error {
 			FlushDuration: s.args.Connection.FlushDuration,
 			Timeout:       s.args.Connection.Timeout,
 			UserAgent:     "alloy",
-		}, uint64(s.args.Connection.QueueCount), s.log, s.stat.update, s.metaStats.update)
+		}, uint64(s.args.Connection.QueueCount), s.log, s.stat.Update, s.metaStats.Update)
 		if err != nil {
 			return err
 		}
 		s.client = client
-
 	}
 	s.args = newArgs
-
 	return nil
 }
 
