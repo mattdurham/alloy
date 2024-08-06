@@ -1,15 +1,15 @@
 package cbor
 
 import (
-	snappy "github.com/eapache/go-xerial-snappy"
-	"github.com/go-kit/log"
-	"github.com/grafana/alloy/internal/alloy/logging/level"
+	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 	"math"
 	"sync"
 	"time"
 
+	snappy "github.com/eapache/go-xerial-snappy"
 	"github.com/fxamacker/cbor/v2"
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/filequeue"
+	"github.com/go-kit/log"
+	"github.com/grafana/alloy/internal/alloy/logging/level"
 )
 
 type Raw struct {
@@ -42,14 +42,14 @@ type Serializer struct {
 	mut           sync.RWMutex
 	maxSizeBytes  int
 	flushDuration time.Duration
-	queue         filequeue.Storage
+	queue         types.FileStorage
 	group         *SeriesGroup
 	lastFlush     time.Time
 	bytesInGroup  uint32
 	logger        log.Logger
 }
 
-func NewSerializer(maxSizeBytes int, flushDuration time.Duration, q filequeue.Storage, l log.Logger) (*Serializer, error) {
+func NewSerializer(maxSizeBytes int, flushDuration time.Duration, q types.FileStorage, l log.Logger) (*Serializer, error) {
 	return &Serializer{
 		maxSizeBytes:  maxSizeBytes,
 		flushDuration: flushDuration,

@@ -1,4 +1,4 @@
-package queue
+package types
 
 import (
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/network"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 	"os"
 	"path/filepath"
 	"sort"
@@ -32,8 +33,8 @@ type Record struct {
 	Data []byte            `cbor:"2,keyasint"`
 }
 
-// NewQueue returns a implementation of Storage.
-func NewQueue(directory string, logger log.Logger) (Storage, error) {
+// NewQueue returns a implementation of FileStorage.
+func NewQueue(directory string, logger log.Logger) (types.FileStorage, error) {
 	err := os.MkdirAll(directory, 0777)
 	if err != nil {
 		return nil, err

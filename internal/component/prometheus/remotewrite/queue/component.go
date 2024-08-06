@@ -21,16 +21,16 @@ import (
 func init() {
 	component.Register(component.Registration{
 		Name:      "prometheus.remote.queue",
-		Args:      Arguments{},
-		Exports:   Exports{},
+		Args:      types.Arguments{},
+		Exports:   types.Exports{},
 		Stability: featuregate.StabilityExperimental,
 		Build: func(opts component.Options, args component.Arguments) (component.Component, error) {
-			return NewComponent(opts, args.(Arguments))
+			return NewComponent(opts, args.(types.Arguments))
 		},
 	})
 }
 
-func NewComponent(opts component.Options, args Arguments) (*Queue, error) {
+func NewComponent(opts component.Options, args types.Arguments) (*Queue, error) {
 	fq, err := filequeue.NewQueue(filepath.Join(opts.DataPath, "wal"), opts.Logger)
 	if err != nil {
 		return nil, err
@@ -46,7 +46,7 @@ func NewComponent(opts component.Options, args Arguments) (*Queue, error) {
 		fq:         fq,
 		log:        opts.Logger,
 	}
-	s.opts.OnStateChange(Exports{Receiver: s})
+	s.opts.OnStateChange(types.Exports{Receiver: s})
 	return s, nil
 }
 
@@ -54,14 +54,14 @@ func NewComponent(opts component.Options, args Arguments) (*Queue, error) {
 // and TTLs.
 type Queue struct {
 	mut        sync.RWMutex
-	args       Arguments
+	args       types.Arguments
 	opts       component.Options
 	serializer *cbor.Serializer
-	fq         filequeue.Storage
-	client     types.WriteClient
+	fq         types.FileStorage
+	client     types.NetworkClient
 	log        log.Logger
-	stat       *Stats
-	metaStats  *Stats
+	stat       *types.Stats
+	metaStats  *types.Stats
 	ctx        context.Context
 }
 
@@ -70,8 +70,8 @@ type Queue struct {
 // Component.
 func (s *Queue) Run(ctx context.Context) error {
 	defer s.fq.Close()
-	stats := NewStats("alloy", "queue_series", s.opts.Registerer)
-	meta := NewStats("alloy", "queue_metadata", s.opts.Registerer)
+	stats := types.NewStats("alloy", "queue_series", s.opts.Registerer)
+	meta := types.NewStats("alloy", "queue_metadata", s.opts.Registerer)
 	client, err := network.New(ctx, network.ConnectionConfig{
 		URL:           s.args.Connection.URL,
 		Username:      s.args.Connection.BasicAuth.Username,
@@ -152,9 +152,9 @@ func (s *Queue) Update(args component.Arguments) error {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 
-	newArgs := args.(Arguments)
+	newArgs := args.(types.Arguments)
 	sync.OnceFunc(func() {
-		s.opts.OnStateChange(Exports{Receiver: s})
+		s.opts.OnStateChange(types.Exports{Receiver: s})
 	})
 	if s.client == nil {
 		s.args = newArgs

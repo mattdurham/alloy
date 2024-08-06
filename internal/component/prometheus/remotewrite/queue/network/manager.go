@@ -21,7 +21,7 @@ type manager struct {
 	logger          log.Logger
 }
 
-var _ types.WriteClient = (*manager)(nil)
+var _ types.NetworkClient = (*manager)(nil)
 
 type ConnectionConfig struct {
 	URL                     string
@@ -35,7 +35,7 @@ type ConnectionConfig struct {
 	FlushDuration           time.Duration
 }
 
-func New(ctx context.Context, cc ConnectionConfig, connectionCount uint64, logger log.Logger, seriesStats, metadataStats func(Stats)) (types.WriteClient, error) {
+func New(ctx context.Context, cc ConnectionConfig, connectionCount uint64, logger log.Logger, seriesStats, metadataStats func(Stats)) (types.NetworkClient, error) {
 	s := &manager{
 		connectionCount: connectionCount,
 		loops:           make([]*loop, 0),

@@ -202,3 +202,5 @@ func (f fq) Next(ctx context.Context, enc []byte) (map[string]string, []byte, st
 
 func (f fq) Delete(_ string) {
 }
+
+func (f fq) Close() {}
