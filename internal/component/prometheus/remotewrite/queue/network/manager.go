@@ -33,6 +33,7 @@ type ConnectionConfig struct {
 	MaxRetryBackoffAttempts time.Duration
 	BatchCount              int
 	FlushDuration           time.Duration
+	ExternalLabels          map[string]string
 }
 
 func New(ctx context.Context, cc ConnectionConfig, connectionCount uint64, logger log.Logger, seriesStats, metadataStats func(types.NetworkStats)) (types.NetworkClient, error) {
@@ -54,9 +55,10 @@ func New(ctx context.Context, cc ConnectionConfig, connectionCount uint64, logge
 			buf:        make([]byte, 0),
 			log:        logger,
 			// We create this with double the batch so that we can always be feeding the queue.
-			ch:        chann.New[[]byte](chann.Cap(cc.BatchCount * 2)),
-			seriesBuf: make([]prompb.TimeSeries, 0),
-			statsFunc: seriesStats,
+			ch:             chann.New[[]byte](chann.Cap(cc.BatchCount * 2)),
+			seriesBuf:      make([]prompb.TimeSeries, 0),
+			statsFunc:      seriesStats,
+			externalLabels: cc.ExternalLabels,
 		}
 		s.loops = append(s.loops, l)
 		go l.runLoop(ctx)

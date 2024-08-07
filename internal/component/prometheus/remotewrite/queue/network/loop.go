@@ -22,19 +22,20 @@ import (
 
 // loop handles the low level sending of data. It conceptually a queue.
 type loop struct {
-	client     *http.Client
-	batchCount int
-	flushTimer time.Duration
-	cfg        ConnectionConfig
-	log        log.Logger
-	pbuf       *proto.Buffer
-	lastSend   time.Time
-	buf        []byte
-	ch         *chann.Chann[[]byte]
-	seriesBuf  []prompb.TimeSeries
-	statsFunc  func(s types.NetworkStats)
-	stopCh     chan struct{}
-	stopCalled atomic.Bool
+	client         *http.Client
+	batchCount     int
+	flushTimer     time.Duration
+	cfg            ConnectionConfig
+	log            log.Logger
+	pbuf           *proto.Buffer
+	lastSend       time.Time
+	buf            []byte
+	ch             *chann.Chann[[]byte]
+	seriesBuf      []prompb.TimeSeries
+	statsFunc      func(s types.NetworkStats)
+	stopCh         chan struct{}
+	stopCalled     atomic.Bool
+	externalLabels map[string]string
 }
 
 func (l *loop) runLoop(ctx context.Context) {
@@ -138,11 +139,31 @@ func (l *loop) send(series [][]byte, retryCount int) sendResult {
 	req := &prompb.WriteRequest{
 		Timeseries: l.seriesBuf,
 	}
+	for k, v := range l.externalLabels {
+		for i, ts := range req.Timeseries {
+			found := false
+			for _, lbl := range ts.Labels {
+				if lbl.Name == k {
+					lbl.Value = v
+					found = true
+					break
+				}
+			}
+			if !found {
+				ts.Labels = append(ts.Labels, prompb.Label{
+					Name:  k,
+					Value: v,
+				})
+			}
+			req.Timeseries[i] = ts
+		}
+	}
 	err := l.pbuf.Marshal(req)
 	if err != nil {
 		result.err = err
 		return result
 	}
+
 	l.buf = l.buf[:0]
 	l.buf = snappy.Encode(l.buf, l.pbuf.Bytes())
 	httpReq, err := http.NewRequest("POST", l.cfg.URL, bytes.NewReader(l.buf))

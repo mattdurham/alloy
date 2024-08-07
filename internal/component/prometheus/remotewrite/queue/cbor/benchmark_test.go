@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/dustin/go-humanize"
 	log2 "github.com/go-kit/log"
+	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 	"github.com/grafana/alloy/internal/static/metrics/wal"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/model/labels"
@@ -64,7 +65,9 @@ func BenchmarkSimpleCbor(b *testing.B) {
 				l := log2.NewNopLogger()
 				wr, err := NewSerializer(32*1024*1024, 500*time.Millisecond, q, l)
 				require.NoError(b, err)
-				app := NewAppender(1*time.Minute, wr, 100, l)
+				app := NewAppender(1*time.Minute, wr, 100, func(s types.FileQueueStats) {
+
+				}, l)
 				tSeries := &ts{
 					v: 0,
 					t: 0,

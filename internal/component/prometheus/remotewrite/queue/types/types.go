@@ -14,14 +14,6 @@ func defaultArgs() Arguments {
 		BatchSizeBytes:    32 * 1024 * 1024,
 		FlushDuration:     5 * time.Second,
 		AppenderBatchSize: 1_000,
-		Connection: ConnectionConfig{
-			Timeout:                 15 * time.Second,
-			RetryBackoff:            1 * time.Second,
-			MaxRetryBackoffAttempts: 0,
-			BatchCount:              1_000,
-			FlushDuration:           1 * time.Second,
-			QueueCount:              4,
-		},
 	}
 }
 
@@ -31,10 +23,11 @@ type Arguments struct {
 	// The batch size to persist to the file queue.
 	BatchSizeBytes int `alloy:"batch_size_bytes,attr,optional"`
 	// How often to flush to the file queue if BatchSizeBytes isn't met.
-	FlushDuration time.Duration    `alloy:"flush_duration,attr,optional"`
-	Connection    ConnectionConfig `alloy:"endpoint,block"`
+	FlushDuration time.Duration      `alloy:"flush_duration,attr,optional"`
+	Connections   []ConnectionConfig `alloy:"endpoint,block"`
 	// AppenderBatchSize determines how often to flush the appender batch size.
-	AppenderBatchSize int `alloy:"appender_batch_size,attr,optional"`
+	AppenderBatchSize int               `alloy:"appender_batch_size,attr,optional"`
+	ExternalLabels    map[string]string `alloy:"external_labels,attr,optional"`
 }
 
 func (a Arguments) TriggerSerializationChange(b Arguments) bool {
@@ -51,10 +44,11 @@ func (a Arguments) TriggerSerializationChange(b Arguments) bool {
 }
 
 func (a Arguments) TriggerWriteClientChange(b Arguments) bool {
-	return reflect.DeepEqual(a.Connection, b.Connection)
+	return reflect.DeepEqual(a.Connections, b.Connections)
 }
 
 type ConnectionConfig struct {
+	Name      string        `alloy:",label"`
 	URL       string        `alloy:"url,attr"`
 	BasicAuth BasicAuth     `alloy:"basic_auth,block,optional"`
 	Timeout   time.Duration `alloy:"write_timeout,attr,optional"`
@@ -85,13 +79,28 @@ type Exports struct {
 func (rc *Arguments) SetToDefault() {
 	*rc = defaultArgs()
 }
+func defaultCC() ConnectionConfig {
+	return ConnectionConfig{
+		Timeout:                 15 * time.Second,
+		RetryBackoff:            1 * time.Second,
+		MaxRetryBackoffAttempts: 0,
+		BatchCount:              1_000,
+		FlushDuration:           1 * time.Second,
+		QueueCount:              4,
+	}
+}
+func (cc *ConnectionConfig) SetToDefault() {
+	*cc = defaultCC()
+}
 
 func (r *Arguments) Validate() error {
 	if r.AppenderBatchSize == 0 {
 		return fmt.Errorf("appender_batch_size must be greater than zero")
 	}
-	if r.Connection.BatchCount <= 0 {
-		return fmt.Errorf("batch_count must be greater than 0")
+	for _, conn := range r.Connections {
+		if conn.BatchCount <= 0 {
+			return fmt.Errorf("batch_count must be greater than 0")
+		}
 	}
 	return nil
 }
