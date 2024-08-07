@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/grafana/alloy/internal/alloy/logging/level"
+	"github.com/go-kit/log/level"
 	"github.com/grafana/alloy/internal/featuregate"
 	httpgo "net/http"
 	"strconv"

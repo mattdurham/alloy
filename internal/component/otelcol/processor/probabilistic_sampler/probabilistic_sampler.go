@@ -4,6 +4,7 @@ package probabilistic_sampler
 import (
 	"github.com/grafana/alloy/internal/component"
 	"github.com/grafana/alloy/internal/component/otelcol"
+	otelcolCfg "github.com/grafana/alloy/internal/component/otelcol/config"
 	"github.com/grafana/alloy/internal/component/otelcol/processor"
 	"github.com/grafana/alloy/internal/featuregate"
 	"github.com/grafana/alloy/syntax"
@@ -30,12 +31,18 @@ func init() {
 type Arguments struct {
 	SamplingPercentage float32 `alloy:"sampling_percentage,attr,optional"`
 	HashSeed           uint32  `alloy:"hash_seed,attr,optional"`
+	Mode               string  `alloy:"mode,attr,optional"`
+	FailClosed         bool    `alloy:"fail_closed,attr,optional"`
+	SamplingPrecision  int     `alloy:"sampling_precision,attr,optional"`
 	AttributeSource    string  `alloy:"attribute_source,attr,optional"`
 	FromAttribute      string  `alloy:"from_attribute,attr,optional"`
 	SamplingPriority   string  `alloy:"sampling_priority,attr,optional"`
 
 	// Output configures where to send processed data. Required.
 	Output *otelcol.ConsumerArguments `alloy:"output,block"`
+
+	// DebugMetrics configures component internal metrics. Optional.
+	DebugMetrics otelcolCfg.DebugMetricsArguments `alloy:"debug_metrics,block,optional"`
 }
 
 var (
@@ -46,12 +53,15 @@ var (
 
 // DefaultArguments holds default settings for Arguments.
 var DefaultArguments = Arguments{
-	AttributeSource: "traceID",
+	FailClosed:        true,
+	AttributeSource:   "traceID",
+	SamplingPrecision: 4,
 }
 
 // SetToDefault implements syntax.Defaulter.
 func (args *Arguments) SetToDefault() {
 	*args = DefaultArguments
+	args.DebugMetrics.SetToDefault()
 }
 
 // Validate implements syntax.Validator.
@@ -69,6 +79,9 @@ func (args Arguments) Convert() (otelcomponent.Config, error) {
 	return &probabilisticsamplerprocessor.Config{
 		SamplingPercentage: args.SamplingPercentage,
 		HashSeed:           args.HashSeed,
+		Mode:               probabilisticsamplerprocessor.SamplerMode(args.Mode),
+		FailClosed:         args.FailClosed,
+		SamplingPrecision:  args.SamplingPrecision,
 		AttributeSource:    probabilisticsamplerprocessor.AttributeSource(args.AttributeSource),
 		FromAttribute:      args.FromAttribute,
 		SamplingPriority:   args.SamplingPriority,
@@ -88,4 +101,9 @@ func (args Arguments) Exporters() map[otelcomponent.DataType]map[otelcomponent.I
 // NextConsumers implements processor.Arguments.
 func (args Arguments) NextConsumers() *otelcol.ConsumerArguments {
 	return args.Output
+}
+
+// DebugMetricsConfig implements processor.Arguments.
+func (args Arguments) DebugMetricsConfig() otelcolCfg.DebugMetricsArguments {
+	return args.DebugMetrics
 }

@@ -5,14 +5,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/grafana/alloy/internal/alloy/componenttest"
-	"github.com/grafana/alloy/internal/component/otelcol"
+	otelcolCfg "github.com/grafana/alloy/internal/component/otelcol/config"
 	"github.com/grafana/alloy/internal/component/otelcol/receiver/zipkin"
+	"github.com/grafana/alloy/internal/runtime/componenttest"
 	"github.com/grafana/alloy/internal/util"
 	"github.com/grafana/alloy/syntax"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/zipkinreceiver"
 	"github.com/phayes/freeport"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/config/confighttp"
 )
 
 func TestRun(t *testing.T) {
@@ -39,6 +40,29 @@ func TestRun(t *testing.T) {
 	}()
 
 	require.NoError(t, ctrl.WaitRunning(time.Second))
+}
+
+func TestArguments_UnmarshalDefaults(t *testing.T) {
+	in := "output {}"
+
+	var args zipkin.Arguments
+	require.NoError(t, syntax.Unmarshal([]byte(in), &args))
+
+	ext, err := args.Convert()
+	require.NoError(t, err)
+
+	otelArgs, ok := (ext).(*zipkinreceiver.Config)
+	require.True(t, ok)
+
+	expected := zipkinreceiver.Config{
+		ServerConfig: confighttp.ServerConfig{
+			Endpoint:              "0.0.0.0:9411",
+			CompressionAlgorithms: []string{"", "gzip", "zstd", "zlib", "snappy", "deflate"},
+		},
+	}
+
+	// Check the arguments
+	require.Equal(t, &expected, otelArgs)
 }
 
 func TestArguments_UnmarshalAlloy(t *testing.T) {
@@ -90,15 +114,16 @@ func TestDebugMetricsConfig(t *testing.T) {
 	tests := []struct {
 		testName string
 		alloyCfg string
-		expected otelcol.DebugMetricsArguments
+		expected otelcolCfg.DebugMetricsArguments
 	}{
 		{
 			testName: "default",
 			alloyCfg: `
 			output {}
 			`,
-			expected: otelcol.DebugMetricsArguments{
+			expected: otelcolCfg.DebugMetricsArguments{
 				DisableHighCardinalityMetrics: true,
+				Level:                         otelcolCfg.LevelDetailed,
 			},
 		},
 		{
@@ -110,8 +135,9 @@ func TestDebugMetricsConfig(t *testing.T) {
 
 			output {}
 			`,
-			expected: otelcol.DebugMetricsArguments{
+			expected: otelcolCfg.DebugMetricsArguments{
 				DisableHighCardinalityMetrics: false,
+				Level:                         otelcolCfg.LevelDetailed,
 			},
 		},
 		{
@@ -123,8 +149,9 @@ func TestDebugMetricsConfig(t *testing.T) {
 
 			output {}
 			`,
-			expected: otelcol.DebugMetricsArguments{
+			expected: otelcolCfg.DebugMetricsArguments{
 				DisableHighCardinalityMetrics: true,
+				Level:                         otelcolCfg.LevelDetailed,
 			},
 		},
 	}

@@ -65,9 +65,23 @@ type Target struct {
 func NewTarget(lbls, discoveredLabels labels.Labels, params url.Values) *Target {
 	publicLabels := make(labels.Labels, 0, len(lbls))
 	for _, l := range lbls {
-		if !strings.HasPrefix(l.Name, model.ReservedLabelPrefix) {
-			publicLabels = append(publicLabels, l)
+		if strings.HasPrefix(l.Name, model.ReservedLabelPrefix) {
+			continue
 		}
+
+		// the fact that godeltaprof was used scraping should not be user visible
+		if l.Name == pprofGoDeltaProfMemory {
+			switch l.Value {
+			case pprofGoDeltaProfMemory:
+				l.Value = pprofMemory
+			case pprofGoDeltaProfBlock:
+				l.Value = pprofBlock
+			case pprofGoDeltaProfMutex:
+				l.Value = pprofMutex
+			}
+		}
+
+		publicLabels = append(publicLabels, l)
 	}
 	url := urlFromTarget(lbls, params)
 
@@ -406,7 +420,11 @@ func targetsFromGroup(group *targetgroup.Group, cfg Arguments, targetTypes map[s
 				}
 
 				if pcfg, found := targetTypes[profType]; found && pcfg.Delta {
-					params.Add("seconds", strconv.Itoa(int((cfg.ScrapeInterval)/time.Second)-1))
+					seconds := (cfg.ScrapeInterval)/time.Second - 1
+					if cfg.DeltaProfilingDuration != defaultProfilingDuration {
+						seconds = (cfg.DeltaProfilingDuration) / time.Second
+					}
+					params.Add("seconds", strconv.Itoa(int(seconds)))
 				}
 				targets = append(targets, NewTarget(lbls, origLabels, params))
 			}

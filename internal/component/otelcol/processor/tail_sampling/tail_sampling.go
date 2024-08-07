@@ -7,6 +7,7 @@ import (
 
 	"github.com/grafana/alloy/internal/component"
 	"github.com/grafana/alloy/internal/component/otelcol"
+	otelcolCfg "github.com/grafana/alloy/internal/component/otelcol/config"
 	"github.com/grafana/alloy/internal/component/otelcol/processor"
 	"github.com/grafana/alloy/internal/featuregate"
 	tsp "github.com/open-telemetry/opentelemetry-collector-contrib/processor/tailsamplingprocessor"
@@ -30,12 +31,15 @@ func init() {
 
 // Arguments configures the otelcol.processor.tail_sampling component.
 type Arguments struct {
-	PolicyCfgs              []PolicyConfig `alloy:"policy,block"`
-	DecisionWait            time.Duration  `alloy:"decision_wait,attr,optional"`
-	NumTraces               uint64         `alloy:"num_traces,attr,optional"`
-	ExpectedNewTracesPerSec uint64         `alloy:"expected_new_traces_per_sec,attr,optional"`
+	PolicyCfgs              []PolicyConfig      `alloy:"policy,block"`
+	DecisionWait            time.Duration       `alloy:"decision_wait,attr,optional"`
+	NumTraces               uint64              `alloy:"num_traces,attr,optional"`
+	ExpectedNewTracesPerSec uint64              `alloy:"expected_new_traces_per_sec,attr,optional"`
+	DecisionCache           DecisionCacheConfig `alloy:"decision_cache,attr,optional"`
 	// Output configures where to send processed data. Required.
 	Output *otelcol.ConsumerArguments `alloy:"output,block"`
+	// DebugMetrics configures component internal metrics. Optional.
+	DebugMetrics otelcolCfg.DebugMetricsArguments `alloy:"debug_metrics,block,optional"`
 }
 
 var (
@@ -52,6 +56,7 @@ var DefaultArguments = Arguments{
 // SetToDefault implements syntax.Defaulter.
 func (args *Arguments) SetToDefault() {
 	*args = DefaultArguments
+	args.DebugMetrics.SetToDefault()
 }
 
 // Validate implements syntax.Validator.
@@ -79,6 +84,7 @@ func (args Arguments) Convert() (otelcomponent.Config, error) {
 		NumTraces:               args.NumTraces,
 		ExpectedNewTracesPerSec: args.ExpectedNewTracesPerSec,
 		PolicyCfgs:              otelPolicyCfgs,
+		DecisionCache:           args.DecisionCache.Convert(),
 	}, nil
 }
 
@@ -95,4 +101,9 @@ func (args Arguments) Exporters() map[otelcomponent.DataType]map[otelcomponent.I
 // NextConsumers implements processor.Arguments.
 func (args Arguments) NextConsumers() *otelcol.ConsumerArguments {
 	return args.Output
+}
+
+// DebugMetricsConfig implements processor.Arguments.
+func (args Arguments) DebugMetricsConfig() otelcolCfg.DebugMetricsArguments {
+	return args.DebugMetrics
 }

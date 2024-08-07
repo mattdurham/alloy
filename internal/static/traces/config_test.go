@@ -619,8 +619,8 @@ exporters:
 processors:
   spanmetrics:
     metrics_exporter: prometheus
-    latency_histogram_buckets: {}
-    dimensions: {}
+    latency_histogram_buckets: []
+    dimensions: []
     aggregation_temporality: AGGREGATION_TEMPORALITY_CUMULATIVE
     metrics_flush_interval: 15s
     dimensions_cache_size: 1000
@@ -779,7 +779,7 @@ load_balancing:
   resolver:
     dns:
       hostname: agent
-      port: 8282
+      port: "8282"
       interval: 12m
       timeout: 76s
 `,
@@ -805,14 +805,14 @@ exporters:
       otlp:
         tls:
           insecure: true
-        endpoint: noop
+        endpoint: noop:8888
         retry_on_failure:
           max_elapsed_time: 60s
         compression: none
     resolver:
       dns:
         hostname: agent
-        port: 8282
+        port: "8282"
         interval: 12m
         timeout: 76s
 processors:
@@ -893,7 +893,7 @@ exporters:
       otlp:
         tls:
           insecure: true
-        endpoint: noop
+        endpoint: noop:8888
         retry_on_failure:
           max_elapsed_time: 60s
         compression: none
@@ -1079,7 +1079,7 @@ processors:
     scrape_configs:
       - im_a_scrape_config
     operation_type: update
-    pod_associations: {}
+    pod_associations: []
 extensions: {}
 service:
   pipelines:
@@ -1218,7 +1218,7 @@ remote_write:
         ca_file: /var/lib/mycert.pem
         cert_file: certfile
         key_file: keyfile
-        min_version: 1.3
+        min_version: "1.3"
         reload_interval: 1h
 `,
 			expectedConfig: `
@@ -1242,7 +1242,7 @@ extensions:
       ca_file: /var/lib/mycert.pem
       cert_file: certfile
       key_file: keyfile
-      min_version: 1.3
+      min_version: "1.3"
       reload_interval: 1h
       cipher_suites: []
 exporters:
@@ -1287,7 +1287,7 @@ remote_write:
         ca_pem: test_secret_ca_pem_string
         cert_pem: test_secret_cert_pem_string
         key_pem: test_secret_key_pem_string
-        max_version: 1.2
+        max_version: "1.2"
         reload_interval: 1h
 `,
 			expectedConfig: `
@@ -1311,7 +1311,7 @@ extensions:
       ca_pem: test_secret_ca_pem_string
       cert_pem: test_secret_cert_pem_string
       key_pem: test_secret_key_pem_string
-      max_version: 1.2
+      max_version: "1.2"
       reload_interval: 1h
       cipher_suites: []
 exporters:
@@ -1569,7 +1569,7 @@ remote_write:
       x-some-header: Some value!
 `,
 			expectedProcessors: map[component.ID][]component.ID{
-				component.NewID("traces"): nil,
+				component.NewID(component.MustNewType("traces")): nil,
 			},
 		},
 		{
@@ -1613,15 +1613,15 @@ service_graphs:
   enabled: true
 `,
 			expectedProcessors: map[component.ID][]component.ID{
-				component.NewID("traces"): {
-					component.NewID("attributes"),
-					component.NewID("spanmetrics"),
-					component.NewID("service_graphs"),
-					component.NewID("tail_sampling"),
-					component.NewID("automatic_logging"),
-					component.NewID("batch"),
+				component.NewID(component.MustNewType("traces")): {
+					component.NewID(component.MustNewType("attributes")),
+					component.NewID(component.MustNewType("spanmetrics")),
+					component.NewID(component.MustNewType("service_graphs")),
+					component.NewID(component.MustNewType("tail_sampling")),
+					component.NewID(component.MustNewType("automatic_logging")),
+					component.NewID(component.MustNewType("batch")),
 				},
-				component.NewIDWithName(spanMetricsPipelineType, spanMetricsPipelineName): nil,
+				component.NewIDWithName(component.MustNewType(spanMetricsPipelineType), spanMetricsPipelineName): nil,
 			},
 		},
 		{
@@ -1668,22 +1668,22 @@ load_balancing:
   resolver:
     dns:
       hostname: agent
-      port: 4318
+      port: "4318"
 service_graphs:
   enabled: true
 `,
 			expectedProcessors: map[component.ID][]component.ID{
-				component.NewIDWithName("traces", "0"): {
-					component.NewID("attributes"),
+				component.NewIDWithName(component.MustNewType("traces"), "0"): {
+					component.NewID(component.MustNewType("attributes")),
 				},
-				component.NewIDWithName("traces", "1"): {
-					component.NewID("spanmetrics"),
-					component.NewID("service_graphs"),
-					component.NewID("tail_sampling"),
-					component.NewID("automatic_logging"),
-					component.NewID("batch"),
+				component.NewIDWithName(component.MustNewType("traces"), "1"): {
+					component.NewID(component.MustNewType("spanmetrics")),
+					component.NewID(component.MustNewType("service_graphs")),
+					component.NewID(component.MustNewType("tail_sampling")),
+					component.NewID(component.MustNewType("automatic_logging")),
+					component.NewID(component.MustNewType("batch")),
 				},
-				component.NewIDWithName(spanMetricsPipelineType, spanMetricsPipelineName): nil,
+				component.NewIDWithName(component.MustNewType(spanMetricsPipelineType), spanMetricsPipelineName): nil,
 			},
 		},
 		{
@@ -1721,18 +1721,18 @@ load_balancing:
   resolver:
     dns:
       hostname: agent
-      port: 4318
+      port: "4318"
 `,
 			expectedProcessors: map[component.ID][]component.ID{
-				component.NewIDWithName("traces", "0"): {
-					component.NewID("attributes"),
+				component.NewIDWithName(component.MustNewType("traces"), "0"): {
+					component.NewID(component.MustNewType("attributes")),
 				},
-				component.NewIDWithName("traces", "1"): {
-					component.NewID("spanmetrics"),
-					component.NewID("automatic_logging"),
-					component.NewID("batch"),
+				component.NewIDWithName(component.MustNewType("traces"), "1"): {
+					component.NewID(component.MustNewType("spanmetrics")),
+					component.NewID(component.MustNewType("automatic_logging")),
+					component.NewID(component.MustNewType("batch")),
 				},
-				component.NewIDWithName(spanMetricsPipelineType, spanMetricsPipelineName): nil,
+				component.NewIDWithName(component.MustNewType(spanMetricsPipelineType), spanMetricsPipelineName): nil,
 			},
 		},
 	}
@@ -1905,7 +1905,7 @@ remote_write:
 	assert.Nil(t, err)
 	otel, err := cfg.OtelConfig()
 	assert.Nil(t, err)
-	assert.Contains(t, otel.Service.Pipelines[component.NewID("traces")].Receivers, component.NewID(pushreceiver.TypeStr))
+	assert.Contains(t, otel.Service.Pipelines[component.NewID(component.MustNewType("traces"))].Receivers, component.NewID(component.MustNewType(pushreceiver.TypeStr)))
 }
 
 func TestUnmarshalYAMLEmptyOTLP(t *testing.T) {

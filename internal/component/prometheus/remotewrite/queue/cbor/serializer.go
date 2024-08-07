@@ -1,6 +1,7 @@
 package cbor
 
 import (
+	"github.com/go-kit/log/level"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 	"math"
 	"sync"
@@ -9,7 +10,6 @@ import (
 	snappy "github.com/eapache/go-xerial-snappy"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/go-kit/log"
-	"github.com/grafana/alloy/internal/alloy/logging/level"
 )
 
 type Raw struct {

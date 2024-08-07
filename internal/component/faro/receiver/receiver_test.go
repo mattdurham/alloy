@@ -8,14 +8,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/grafana/alloy/internal/alloy/componenttest"
-	"github.com/grafana/alloy/internal/component/common/loki"
-	"github.com/grafana/alloy/internal/component/otelcol"
-	"github.com/grafana/alloy/internal/util"
-	"github.com/grafana/loki/pkg/logproto"
+	"github.com/grafana/loki/v3/pkg/logproto"
 	"github.com/phayes/freeport"
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/require"
+
+	"github.com/grafana/alloy/internal/component/common/loki"
+	"github.com/grafana/alloy/internal/component/otelcol"
+	"github.com/grafana/alloy/internal/runtime/componenttest"
+	"github.com/grafana/alloy/internal/util"
 )
 
 // Test performs an end-to-end test of the component.
@@ -36,7 +37,8 @@ func Test(t *testing.T) {
 	go func() {
 		err := ctrl.Run(ctx, Arguments{
 			LogLabels: map[string]string{
-				"foo": "bar",
+				"foo":  "bar",
+				"kind": "",
 			},
 
 			Server: ServerArguments{
@@ -100,7 +102,8 @@ func Test(t *testing.T) {
 
 	expect := loki.Entry{
 		Labels: model.LabelSet{
-			"foo": model.LabelValue("bar"),
+			"foo":  model.LabelValue("bar"),
+			"kind": model.LabelValue("log"),
 		},
 		Entry: logproto.Entry{
 			Line: `timestamp="2021-01-01 00:00:00 +0000 UTC" kind=log message="hello, world" level=info context_env=dev traceID=0 spanID=0 browser_mobile=false`,

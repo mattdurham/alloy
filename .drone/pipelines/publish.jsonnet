@@ -6,11 +6,16 @@ local ghTokenFilename = '/drone/src/gh-token.txt';
 // job_names gets the list of job names for use in depends_on.
 local job_names = function(jobs) std.map(function(job) job.name, jobs);
 
-local linux_containers = ['alloy'];
-local windows_containers = ['alloy'];
+local linux_containers = [
+  { devel: 'alloy-devel', release: 'alloy' },
+  { devel: 'alloy-devel-boringcrypto', release: 'alloy-boringcrypto' },
+];
+local windows_containers = [
+  { devel: 'alloy-devel', release: 'alloy' },
+];
 
 local linux_containers_dev_jobs = std.map(function(container) (
-  pipelines.linux('Publish development Linux %s container' % container) {
+  pipelines.linux('Publish Linux %s container' % container.devel) {
     trigger: {
       ref: ['refs/heads/main'],
     },
@@ -45,11 +50,11 @@ local linux_containers_dev_jobs = std.map(function(container) (
         'docker login -u $DOCKER_LOGIN -p $DOCKER_PASSWORD',
 
         // Create a buildx worker for our cross platform builds.
-        'docker buildx create --name multiarch-alloy-%s-${DRONE_COMMIT_SHA} --driver docker-container --use' % container,
+        'docker buildx create --name multiarch-alloy-%s-${DRONE_COMMIT_SHA} --driver docker-container --use' % container.devel,
 
-        './tools/ci/docker-containers %s-devel' % container,
+        './tools/ci/docker-containers %s' % container.devel,
 
-        'docker buildx rm multiarch-alloy-%s-${DRONE_COMMIT_SHA}' % container,
+        'docker buildx rm multiarch-alloy-%s-${DRONE_COMMIT_SHA}' % container.devel,
       ],
     }],
     volumes: [{
@@ -60,7 +65,7 @@ local linux_containers_dev_jobs = std.map(function(container) (
 ), linux_containers);
 
 local windows_containers_dev_jobs = std.map(function(container) (
-  pipelines.windows('Publish development Windows %s container' % container) {
+  pipelines.windows('Publish Windows %s container' % container.devel) {
     trigger: {
       ref: ['refs/heads/main'],
     },
@@ -80,7 +85,7 @@ local windows_containers_dev_jobs = std.map(function(container) (
         pipelines.windows_command('mkdir -p $HOME/.docker'),
         pipelines.windows_command('printenv GCR_CREDS > $HOME/.docker/config.json'),
         pipelines.windows_command('docker login -u $DOCKER_LOGIN -p $DOCKER_PASSWORD'),
-        pipelines.windows_command('./tools/ci/docker-containers-windows %s-devel' % container),
+        pipelines.windows_command('./tools/ci/docker-containers-windows %s' % container.devel),
       ],
     }],
     volumes: [{
@@ -91,7 +96,7 @@ local windows_containers_dev_jobs = std.map(function(container) (
 ), windows_containers);
 
 local linux_containers_jobs = std.map(function(container) (
-  pipelines.linux('Publish Linux %s container' % container) {
+  pipelines.linux('Publish Linux %s container' % container.release) {
     trigger: {
       ref: ['refs/tags/v*'],
     },
@@ -126,11 +131,11 @@ local linux_containers_jobs = std.map(function(container) (
         'docker login -u $DOCKER_LOGIN -p $DOCKER_PASSWORD',
 
         // Create a buildx worker for our cross platform builds.
-        'docker buildx create --name multiarch-alloy-%s-${DRONE_COMMIT_SHA} --driver docker-container --use' % container,
+        'docker buildx create --name multiarch-alloy-%s-${DRONE_COMMIT_SHA} --driver docker-container --use' % container.release,
 
-        './tools/ci/docker-containers %s' % container,
+        './tools/ci/docker-containers %s' % container.release,
 
-        'docker buildx rm multiarch-alloy-%s-${DRONE_COMMIT_SHA}' % container,
+        'docker buildx rm multiarch-alloy-%s-${DRONE_COMMIT_SHA}' % container.release,
       ],
     }],
     volumes: [{
@@ -142,7 +147,7 @@ local linux_containers_jobs = std.map(function(container) (
 
 
 local windows_containers_jobs = std.map(function(container) (
-  pipelines.windows('Publish Windows %s container' % container) {
+  pipelines.windows('Publish Windows %s container' % container.release) {
     trigger: {
       ref: ['refs/tags/v*'],
     },
@@ -162,7 +167,7 @@ local windows_containers_jobs = std.map(function(container) (
         pipelines.windows_command('mkdir -p $HOME/.docker'),
         pipelines.windows_command('printenv GCR_CREDS > $HOME/.docker/config.json'),
         pipelines.windows_command('docker login -u $DOCKER_LOGIN -p $DOCKER_PASSWORD'),
-        pipelines.windows_command('./tools/ci/docker-containers-windows %s' % container),
+        pipelines.windows_command('./tools/ci/docker-containers-windows %s' % container.release),
       ],
     }],
     volumes: [{
@@ -174,63 +179,50 @@ local windows_containers_jobs = std.map(function(container) (
 
 linux_containers_dev_jobs + windows_containers_dev_jobs +
 linux_containers_jobs + windows_containers_jobs + [
-  // TODO(rfratto): Re-enable CD for development images.
-  /*
-    pipelines.linux('Deploy to deployment_tools') {
-      trigger: {
-        ref: ['refs/heads/main'],
-      },
-      image_pull_secrets: ['dockerconfigjson'],
-      steps: [
-        {
-          name: 'Create .image-tag',
-          image: 'alpine',
-          commands: [
-            'apk update && apk add git',
-            'echo "$(sh ./tools/image-tag)" > .tag-only',
-            'echo "grafana/agent:$(sh ./tools/image-tag)" > .image-tag',
-          ],
-        },
-        {
-          name: 'Update deployment_tools',
-          image: 'us.gcr.io/kubernetes-dev/drone/plugins/updater',
-          settings: {
-            config_json: |||
-              {
-                "git_committer_name": "updater-for-ci[bot]",
-                "git_author_name": "updater-for-ci[bot]",
-                "git_committer_email": "119986603+updater-for-ci[bot]@users.noreply.github.com",
-                "git_author_email": "119986603+updater-for-ci[bot]@users.noreply.github.com",
-                "destination_branch": "master",
-                "repo_name": "deployment_tools",
-                "update_jsonnet_attribute_configs": [
-                  {
-                    "file_path": "ksonnet/environments/kowalski/dev-us-central-0.kowalski-dev/main.jsonnet",
-                    "jsonnet_key": "agent_image",
-                    "jsonnet_value_file": ".image-tag"
-                  },
-                  {
-                    "file_path": "ksonnet/environments/grafana-agent/waves/agent.libsonnet",
-                    "jsonnet_key": "dev_canary",
-                    "jsonnet_value_file": ".image-tag"
-                  },
-                  {
-                    "file_path": "ksonnet/environments/pyroscope-ebpf/waves/ebpf.libsonnet",
-                    "jsonnet_key": "dev_canary",
-                    "jsonnet_value_file": ".image-tag"
-                  }
-                ]
-              }
-            |||,
-            github_app_id: secrets.updater_app_id.fromSecret,
-            github_app_installation_id: secrets.updater_app_installation_id.fromSecret,
-            github_app_private_key: secrets.updater_private_key.fromSecret,
-          },
-        },
-      ],
-      depends_on: job_names(linux_containers_dev_jobs),
+  pipelines.linux('Deploy to deployment_tools') {
+    trigger: {
+      ref: ['refs/heads/main'],
     },
-  */
+    image_pull_secrets: ['dockerconfigjson'],
+    steps: [
+      {
+        name: 'Create .image-tag',
+        image: 'alpine',
+        commands: [
+          'apk add --no-cache bash git',
+          'echo "$(bash ./tools/image-tag-docker)" > .tag-only',
+          'echo "grafana/alloy-dev:$(bash ./tools/image-tag-docker)" > .image-tag',
+        ],
+      },
+      {
+        name: 'Update deployment_tools',
+        image: 'us.gcr.io/kubernetes-dev/drone/plugins/updater',
+        settings: {
+          config_json: |||
+            {
+              "git_committer_name": "updater-for-ci[bot]",
+              "git_author_name": "updater-for-ci[bot]",
+              "git_committer_email": "119986603+updater-for-ci[bot]@users.noreply.github.com",
+              "git_author_email": "119986603+updater-for-ci[bot]@users.noreply.github.com",
+              "destination_branch": "master",
+              "repo_name": "deployment_tools",
+              "update_jsonnet_attribute_configs": [
+                {
+                  "file_path": "ksonnet/environments/grafana-agent/waves/alloy.libsonnet",
+                  "jsonnet_key": "dev_canary",
+                  "jsonnet_value_file": ".image-tag"
+                }
+              ]
+            }
+          |||,
+          github_app_id: secrets.updater_app_id.fromSecret,
+          github_app_installation_id: secrets.updater_app_installation_id.fromSecret,
+          github_app_private_key: secrets.updater_private_key.fromSecret,
+        },
+      },
+    ],
+    depends_on: job_names(linux_containers_dev_jobs),
+  },
 
   pipelines.linux('Publish release') {
     trigger: {

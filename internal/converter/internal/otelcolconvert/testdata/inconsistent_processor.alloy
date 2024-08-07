@@ -1,7 +1,11 @@
 otelcol.receiver.otlp "default" {
-	grpc { }
+	grpc {
+		endpoint = "localhost:4317"
+	}
 
-	http { }
+	http {
+		endpoint = "localhost:4318"
+	}
 
 	output {
 		metrics = [otelcol.exporter.otlp.default.input]
@@ -12,9 +16,7 @@ otelcol.receiver.otlp "default" {
 
 otelcol.processor.batch "default" {
 	output {
-		metrics = []
-		logs    = [otelcol.exporter.otlp.default.input]
-		traces  = []
+		logs = [otelcol.exporter.otlp.default.input]
 	}
 }
 

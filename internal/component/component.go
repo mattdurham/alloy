@@ -113,3 +113,9 @@ type DebugComponent interface {
 	// DebugInfo must be safe for calling concurrently.
 	DebugInfo() interface{}
 }
+
+// LiveDebugging is an interface used by the components that support the live debugging feature.
+type LiveDebugging interface {
+	// LiveDebugging is invoked when the number of consumers changes.
+	LiveDebugging(consumers int)
+}

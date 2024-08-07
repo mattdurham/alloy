@@ -13,7 +13,7 @@ import (
 	otelextension "go.opentelemetry.io/collector/extension"
 )
 
-const DefaultBalancerName = "pick_first"
+const DefaultBalancerName = "round_robin"
 
 // GRPCServerArguments holds shared gRPC settings for components which launch
 // gRPC servers.
@@ -50,7 +50,7 @@ func (args *GRPCServerArguments) Convert() *otelconfiggrpc.ServerConfig {
 	return &otelconfiggrpc.ServerConfig{
 		NetAddr: confignet.AddrConfig{
 			Endpoint:  args.Endpoint,
-			Transport: args.Transport,
+			Transport: confignet.TransportType(args.Transport),
 		},
 
 		TLSSetting: args.TLS.Convert(),

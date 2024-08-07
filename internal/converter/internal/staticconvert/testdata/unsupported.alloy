@@ -52,17 +52,17 @@ prometheus.remote_write "integrations" {
 
 otelcol.receiver.otlp "default" {
 	grpc {
+		endpoint         = "localhost:4317"
 		include_metadata = true
 	}
 
 	http {
+		endpoint         = "localhost:4318"
 		include_metadata = true
 	}
 
 	output {
-		metrics = []
-		logs    = []
-		traces  = [otelcol.exporter.otlp.default_0.input, otelcol.exporter.logging.default.input]
+		traces = [otelcol.exporter.otlp.default_0.input, otelcol.exporter.logging.default.input]
 	}
 }
 
@@ -72,7 +72,7 @@ otelcol.exporter.otlp "default_0" {
 	}
 
 	client {
-		endpoint = "http://localhost:1234/write"
+		endpoint = "http://localhost:1234"
 	}
 }
 

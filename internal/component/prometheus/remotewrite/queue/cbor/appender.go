@@ -2,10 +2,10 @@ package cbor
 
 import (
 	"fmt"
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 	"time"
 
 	"github.com/go-kit/log"
+	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"

@@ -4,7 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/grafana/alloy/internal/component/otelcol"
+	otelcolCfg "github.com/grafana/alloy/internal/component/otelcol/config"
+	"github.com/grafana/alloy/internal/component/otelcol/internal/fakeconsumer"
 	"github.com/grafana/alloy/internal/component/otelcol/receiver/kafka"
 	"github.com/grafana/alloy/syntax"
 	"github.com/mitchellh/mapstructure"
@@ -29,7 +30,6 @@ func TestArguments_UnmarshalAlloy(t *testing.T) {
 			expected: kafkareceiver.Config{
 				Brokers:         []string{"10.10.10.10:9092"},
 				ProtocolVersion: "2.0.0",
-				Topic:           "otlp_spans",
 				Encoding:        "otlp_proto",
 				GroupID:         "otel-collector",
 				ClientID:        "otel-collector",
@@ -153,7 +153,6 @@ func TestArguments_Auth(t *testing.T) {
 			expected: map[string]interface{}{
 				"brokers":          []string{"10.10.10.10:9092"},
 				"protocol_version": "2.0.0",
-				"topic":            "otlp_spans",
 				"encoding":         "otlp_proto",
 				"group_id":         "otel-collector",
 				"client_id":        "otel-collector",
@@ -205,7 +204,6 @@ func TestArguments_Auth(t *testing.T) {
 			expected: map[string]interface{}{
 				"brokers":          []string{"10.10.10.10:9092"},
 				"protocol_version": "2.0.0",
-				"topic":            "otlp_spans",
 				"encoding":         "otlp_proto",
 				"group_id":         "otel-collector",
 				"client_id":        "otel-collector",
@@ -263,7 +261,6 @@ func TestArguments_Auth(t *testing.T) {
 			expected: map[string]interface{}{
 				"brokers":          []string{"10.10.10.10:9092"},
 				"protocol_version": "2.0.0",
-				"topic":            "otlp_spans",
 				"encoding":         "otlp_proto",
 				"group_id":         "otel-collector",
 				"client_id":        "otel-collector",
@@ -312,6 +309,7 @@ func TestArguments_Auth(t *testing.T) {
 						password = "test_password"
 						config_file = "test_config_filem"
 						keytab_file = "test_keytab_file"
+						disable_fast_negotiation = true
 					}
 				}
 
@@ -320,7 +318,6 @@ func TestArguments_Auth(t *testing.T) {
 			expected: map[string]interface{}{
 				"brokers":          []string{"10.10.10.10:9092"},
 				"protocol_version": "2.0.0",
-				"topic":            "otlp_spans",
 				"encoding":         "otlp_proto",
 				"group_id":         "otel-collector",
 				"client_id":        "otel-collector",
@@ -342,13 +339,14 @@ func TestArguments_Auth(t *testing.T) {
 				},
 				"auth": map[string]interface{}{
 					"kerberos": map[string]interface{}{
-						"service_name": "test_service_name",
-						"realm":        "test_realm",
-						"use_keytab":   true,
-						"username":     "test_username",
-						"password":     "test_password",
-						"config_file":  "test_config_filem",
-						"keytab_file":  "test_keytab_file",
+						"service_name":             "test_service_name",
+						"realm":                    "test_realm",
+						"use_keytab":               true,
+						"username":                 "test_username",
+						"password":                 "test_password",
+						"config_file":              "test_config_filem",
+						"keytab_file":              "test_keytab_file",
+						"disable_fast_negotiation": true,
 					},
 				},
 			},
@@ -379,7 +377,7 @@ func TestDebugMetricsConfig(t *testing.T) {
 	tests := []struct {
 		testName string
 		alloyCfg string
-		expected otelcol.DebugMetricsArguments
+		expected otelcolCfg.DebugMetricsArguments
 	}{
 		{
 			testName: "default",
@@ -388,8 +386,9 @@ func TestDebugMetricsConfig(t *testing.T) {
 			protocol_version = "2.0.0"
 			output {}
 			`,
-			expected: otelcol.DebugMetricsArguments{
+			expected: otelcolCfg.DebugMetricsArguments{
 				DisableHighCardinalityMetrics: true,
+				Level:                         otelcolCfg.LevelDetailed,
 			},
 		},
 		{
@@ -402,8 +401,9 @@ func TestDebugMetricsConfig(t *testing.T) {
 			}
 			output {}
 			`,
-			expected: otelcol.DebugMetricsArguments{
+			expected: otelcolCfg.DebugMetricsArguments{
 				DisableHighCardinalityMetrics: false,
+				Level:                         otelcolCfg.LevelDetailed,
 			},
 		},
 		{
@@ -416,8 +416,9 @@ func TestDebugMetricsConfig(t *testing.T) {
 			}
 			output {}
 			`,
-			expected: otelcol.DebugMetricsArguments{
+			expected: otelcolCfg.DebugMetricsArguments{
 				DisableHighCardinalityMetrics: true,
+				Level:                         otelcolCfg.LevelDetailed,
 			},
 		},
 	}
@@ -432,4 +433,29 @@ func TestDebugMetricsConfig(t *testing.T) {
 			require.Equal(t, tc.expected, args.DebugMetricsConfig())
 		})
 	}
+}
+
+func TestArguments_Validate(t *testing.T) {
+	cfg := `
+		brokers = ["10.10.10.10:9092"]
+		protocol_version = "2.0.0"
+		topic = "traces"
+		output {
+		}
+	`
+	var args kafka.Arguments
+	require.NoError(t, syntax.Unmarshal([]byte(cfg), &args))
+
+	// Adding two traces consumer, expect no error
+	args.Output.Traces = append(args.Output.Traces, &fakeconsumer.Consumer{})
+	args.Output.Traces = append(args.Output.Traces, &fakeconsumer.Consumer{})
+	require.NoError(t, args.Validate())
+
+	// Adding another signal type
+	args.Output.Logs = append(args.Output.Logs, &fakeconsumer.Consumer{})
+	require.ErrorContains(t, args.Validate(), "only one signal can be set in the output block when a Kafka topic is explicitly set; currently set signals: logs, traces")
+
+	// Adding another signal type
+	args.Output.Metrics = append(args.Output.Metrics, &fakeconsumer.Consumer{})
+	require.ErrorContains(t, args.Validate(), "only one signal can be set in the output block when a Kafka topic is explicitly set; currently set signals: logs, metrics, traces")
 }

@@ -3,7 +3,6 @@ package remotewrite
 import (
 	"context"
 	"fmt"
-	"github.com/grafana/alloy/internal/featuregate"
 	"math"
 	"os"
 	"path/filepath"
@@ -11,10 +10,11 @@ import (
 	"time"
 
 	"github.com/go-kit/log"
-	"github.com/grafana/alloy/internal/alloy/logging/level"
 	"github.com/grafana/alloy/internal/alloyseed"
 	"github.com/grafana/alloy/internal/component"
 	"github.com/grafana/alloy/internal/component/prometheus"
+	"github.com/grafana/alloy/internal/featuregate"
+	"github.com/grafana/alloy/internal/runtime/logging/level"
 	"github.com/grafana/alloy/internal/service/labelstore"
 	"github.com/grafana/alloy/internal/static/metrics/wal"
 	"github.com/grafana/alloy/internal/useragent"
@@ -66,7 +66,6 @@ type Component struct {
 
 // New creates a new prometheus.remote_write component.
 func New(o component.Options, c Arguments) (*Component, error) {
-	labelstore.EnableGlobalStore.Store(true)
 	// Older versions of prometheus.remote_write used the subpath below, which
 	// added in too many extra unnecessary directories (since o.DataPath is
 	// already unique).
@@ -84,6 +83,8 @@ func New(o component.Options, c Arguments) (*Component, error) {
 
 	remoteLogger := log.With(o.Logger, "subcomponent", "rw")
 	remoteStore := remote.NewStorage(remoteLogger, o.Registerer, startTime, o.DataPath, remoteFlushDeadline, nil)
+
+	walStorage.SetNotifier(remoteStore)
 
 	service, err := o.GetServiceData(labelstore.ServiceName)
 	if err != nil {

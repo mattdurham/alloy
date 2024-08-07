@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/grafana/alloy/internal/alloy/componenttest"
 	probabilisticsampler "github.com/grafana/alloy/internal/component/otelcol/processor/probabilistic_sampler"
 	"github.com/grafana/alloy/internal/component/otelcol/processor/processortest"
+	"github.com/grafana/alloy/internal/runtime/componenttest"
 	"github.com/grafana/alloy/internal/util"
 	"github.com/grafana/alloy/syntax"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/processor/probabilisticsamplerprocessor"
@@ -27,7 +27,9 @@ func TestArguments_UnmarshalAlloy(t *testing.T) {
 				`,
 			expected: probabilisticsamplerprocessor.Config{
 				SamplingPercentage: 0,
+				SamplingPrecision:  4,
 				HashSeed:           0,
+				FailClosed:         true,
 				AttributeSource:    "traceID",
 				FromAttribute:      "",
 				SamplingPriority:   "",
@@ -38,6 +40,9 @@ func TestArguments_UnmarshalAlloy(t *testing.T) {
 			cfg: `
 					sampling_percentage = 10
 					hash_seed = 123
+					mode = "equalizing"
+					fail_closed = false
+					sampling_precision = 13
 					attribute_source = "record"
 					from_attribute = "logID"
 					sampling_priority = "priority"
@@ -46,6 +51,9 @@ func TestArguments_UnmarshalAlloy(t *testing.T) {
 			expected: probabilisticsamplerprocessor.Config{
 				SamplingPercentage: 10,
 				HashSeed:           123,
+				Mode:               "equalizing",
+				FailClosed:         false,
+				SamplingPrecision:  13,
 				AttributeSource:    "record",
 				FromAttribute:      "logID",
 				SamplingPriority:   "priority",
@@ -57,7 +65,7 @@ func TestArguments_UnmarshalAlloy(t *testing.T) {
 					sampling_percentage = -1
 					output {}
 				`,
-			errorMsg: "negative sampling rate: -1.00",
+			errorMsg: "sampling rate is negative: -1.000000%",
 		},
 		{
 			testName: "Invalid AttributeSource",
@@ -121,6 +129,8 @@ func TestLogProcessing(t *testing.T) {
 	cfg := `
 			sampling_percentage = 100
 			hash_seed = 123
+			attribute_source = "traceID"
+			from_attribute = "foo"
 			output {
 				// no-op: will be overridden by test code.
 			}
@@ -152,6 +162,18 @@ func TestLogProcessing(t *testing.T) {
 						"value": {
 							"stringValue": "bar"
 						}
+					},
+					{
+						"key": "sampling.randomness",
+						"value": {
+							"stringValue": "37e0313b4df207"
+						}
+					},
+					{
+						"key": "sampling.threshold",
+						"value": {
+							"stringValue": "0"
+						}
 					}]
 				}]
 			}]
@@ -177,7 +199,8 @@ func TestTraceProcessing(t *testing.T) {
 		"resourceSpans": [{
 			"scopeSpans": [{
 				"spans": [{
-					"name": "TestSpan"
+					"name": "TestSpan",
+					"traceId": "0123456789abcdef0123456789abcdef"
 				}]
 			}]
 		}]
@@ -187,7 +210,9 @@ func TestTraceProcessing(t *testing.T) {
 		"resourceSpans": [{
 			"scopeSpans": [{
 				"spans": [{
-					"name": "TestSpan"
+					"name": "TestSpan",
+					"traceId": "0123456789abcdef0123456789abcdef",
+					"traceState": "ot=rv:db840a0a82091e;th:0"
 				}]
 			}]
 		}]

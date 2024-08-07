@@ -22,7 +22,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	ss "github.com/jaegertracing/jaeger/cmd/collector/app/sampling/strategystore"
+	ss "github.com/jaegertracing/jaeger/cmd/collector/app/sampling/samplingstrategy"
 	"github.com/jaegertracing/jaeger/proto-gen/api_v2"
 )
 
@@ -39,7 +39,7 @@ type storedStrategies struct {
 type strategyLoader func() ([]byte, error)
 
 // NewStrategyStore creates a strategy store that holds static sampling strategies.
-func NewStrategyStore(strats string, logger *zap.Logger) (ss.StrategyStore, error) {
+func NewStrategyStore(strats string, logger *zap.Logger) (ss.Provider, error) {
 	h := &strategyStore{
 		logger: logger,
 	}
@@ -69,7 +69,8 @@ func (h *strategyStore) GetSamplingStrategy(_ context.Context, serviceName strin
 }
 
 // Close stops updating the strategies
-func (h *strategyStore) Close() {
+func (h *strategyStore) Close() error {
+	return nil
 }
 
 // TODO good candidate for a global util function

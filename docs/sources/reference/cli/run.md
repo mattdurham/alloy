@@ -51,10 +51,12 @@ The following flags are supported:
 * `--cluster.advertise-interfaces`: List of interfaces used to infer an address to advertise. Set to `all` to use all available network interfaces on the system. (default `"eth0,en0"`).
 * `--cluster.max-join-peers`: Number of peers to join from the discovered set (default `5`).
 * `--cluster.name`: Name to prevent nodes without this identifier from joining the cluster (default `""`).
+* `--cluster.use-discovery-v1`: Use the older, v1 version of cluster peer discovery mechanism (default `false`). Note that this flag will be deprecated in the future and eventually removed.
 * `--config.format`: The format of the source file. Supported formats: `alloy`, `otelcol`, `prometheus`, `promtail`, `static` (default `"alloy"`).
 * `--config.bypass-conversion-errors`: Enable bypassing errors when converting (default `false`).
 * `--config.extra-args`: Extra arguments from the original format used by the converter.
 * `--stability.level`: The minimum permitted stability level of functionality to run. Supported values: `experimental`, `public-preview`, `generally-available` (default `"generally-available"`).
+* `--feature.community-components.enabled`: Enable community components (default `false`).
 
 ## Update the configuration file
 
@@ -106,7 +108,7 @@ If `--cluster.advertise-interfaces` isn't explicitly set, {{< param "PRODUCT_NAM
 {{< param "PRODUCT_NAME" >}} will fail to start if it can't determine the advertised address.
 Since Windows doesn't use the interface names `eth0` or `en0`, Windows users must explicitly pass at least one valid network interface for `--cluster.advertise-interfaces` or a value for `--cluster.advertise-address`.
 
-The comma-separated list of addresses provided in `--cluster.join-addresses` can either be IP addresses with an optional port, or DNS records to lookup.
+The comma-separated list of addresses provided in `--cluster.join-addresses` can either be IP addresses with an optional port, or DNS SRV records to lookup.
 The ports on the list of addresses default to the port used for the HTTP listener if not explicitly provided.
 We recommend that you align the port numbers on as many nodes as possible to simplify the deployment process.
 
@@ -136,6 +138,9 @@ When `--cluster.name` is provided, nodes will only join peers who share the same
 By default, the cluster name is empty, and any node that doesn't set the flag can join.
 Attempting to join a cluster with a wrong `--cluster.name` will result in a "failed to join memberlist" error.
 
+The `--cluster.use-discovery-v1` flag can be used to switch back to the older, v1 version of the cluster peer discovery mechanism
+in case of any issues with the newer version. This flag will be deprecated in the future and eventually removed.
+
 ### Clustering states
 
 Clustered {{< param "PRODUCT_NAME" >}}s are in one of three states:
@@ -164,11 +169,12 @@ original configuration.
 Include `--config.extra-args` to pass additional command line flags from the original format to the converter.
 Refer to [alloy convert][] for more details on how `extra-args` work.
 
+
 [alloy convert]: ../convert/
-[clustering]:  ../../../concepts/clustering/
+[clustering]:  ../../../get-started/clustering/
 [go-discover]: https://github.com/hashicorp/go-discover
-[in-memory HTTP traffic]: ../../../concepts/component_controller/#in-memory-traffic
+[in-memory HTTP traffic]: ../../../get-started/component_controller/#in-memory-traffic
 [data collection]: ../../../data-collection/
-[components]: ../../concepts/components/
-[component controller]: ../../../concepts/component_controller/
-[UI]: ../../tasks/debug/#clustering-page
+[components]: ../../get-started/components/
+[component controller]: ../../../get-started/component_controller/
+[UI]: ../../../troubleshoot/debug/#clustering-page

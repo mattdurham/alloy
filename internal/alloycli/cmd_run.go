@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -15,33 +16,36 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/KimMachineGun/automemlimit/memlimit"
 	"github.com/fatih/color"
 	"github.com/go-kit/log"
-	"github.com/grafana/alloy/internal/alloy"
-	"github.com/grafana/alloy/internal/alloy/logging"
-	"github.com/grafana/alloy/internal/alloy/logging/level"
-	"github.com/grafana/alloy/internal/alloy/tracing"
-	"github.com/grafana/alloy/internal/alloyseed"
-	"github.com/grafana/alloy/internal/boringcrypto"
-	"github.com/grafana/alloy/internal/component"
-	"github.com/grafana/alloy/internal/converter"
-	convert_diag "github.com/grafana/alloy/internal/converter/diag"
-	"github.com/grafana/alloy/internal/featuregate"
-	"github.com/grafana/alloy/internal/service"
-	httpservice "github.com/grafana/alloy/internal/service/http"
-	"github.com/grafana/alloy/internal/service/labelstore"
-	otel_service "github.com/grafana/alloy/internal/service/otel"
-	remotecfgservice "github.com/grafana/alloy/internal/service/remotecfg"
-	uiservice "github.com/grafana/alloy/internal/service/ui"
-	"github.com/grafana/alloy/internal/static/config/instrumentation"
-	"github.com/grafana/alloy/internal/usagestats"
-	"github.com/grafana/alloy/syntax/diag"
 	"github.com/grafana/ckit/advertise"
 	"github.com/grafana/ckit/peer"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/exp/maps"
+
+	"github.com/grafana/alloy/internal/alloyseed"
+	"github.com/grafana/alloy/internal/boringcrypto"
+	"github.com/grafana/alloy/internal/component"
+	"github.com/grafana/alloy/internal/converter"
+	convert_diag "github.com/grafana/alloy/internal/converter/diag"
+	"github.com/grafana/alloy/internal/featuregate"
+	alloy_runtime "github.com/grafana/alloy/internal/runtime"
+	"github.com/grafana/alloy/internal/runtime/logging"
+	"github.com/grafana/alloy/internal/runtime/logging/level"
+	"github.com/grafana/alloy/internal/runtime/tracing"
+	"github.com/grafana/alloy/internal/service"
+	httpservice "github.com/grafana/alloy/internal/service/http"
+	"github.com/grafana/alloy/internal/service/labelstore"
+	"github.com/grafana/alloy/internal/service/livedebugging"
+	otel_service "github.com/grafana/alloy/internal/service/otel"
+	remotecfgservice "github.com/grafana/alloy/internal/service/remotecfg"
+	uiservice "github.com/grafana/alloy/internal/service/ui"
+	"github.com/grafana/alloy/internal/static/config/instrumentation"
+	"github.com/grafana/alloy/internal/usagestats"
+	"github.com/grafana/alloy/syntax/diag"
 
 	// Install Components
 	_ "github.com/grafana/alloy/internal/component/all"
@@ -58,7 +62,7 @@ func runCommand() *cobra.Command {
 		enablePprof:           true,
 		configFormat:          "alloy",
 		clusterAdvInterfaces:  advertise.DefaultInterfaces,
-		ClusterMaxJoinPeers:   5,
+		clusterMaxJoinPeers:   5,
 		clusterRejoinInterval: 60 * time.Second,
 	}
 
@@ -69,7 +73,7 @@ func runCommand() *cobra.Command {
 is received.
 
 run must be provided an argument pointing at the Alloy configuration
-dirirectory or file path to use. If the configuration directory or file path
+directory or file path to use. If the configuration directory or file path
 wasn't specified, can't be loaded, or contains errors, run will exit
 immediately.
 
@@ -124,9 +128,13 @@ depending on the nature of the reload error.
 	cmd.Flags().
 		DurationVar(&r.clusterRejoinInterval, "cluster.rejoin-interval", r.clusterRejoinInterval, "How often to rejoin the list of peers")
 	cmd.Flags().
-		IntVar(&r.ClusterMaxJoinPeers, "cluster.max-join-peers", r.ClusterMaxJoinPeers, "Number of peers to join from the discovered set")
+		IntVar(&r.clusterMaxJoinPeers, "cluster.max-join-peers", r.clusterMaxJoinPeers, "Number of peers to join from the discovered set")
 	cmd.Flags().
 		StringVar(&r.clusterName, "cluster.name", r.clusterName, "The name of the cluster to join")
+	// TODO(alloy/#1274): make this flag a no-op once we have more confidence in this feature, and add issue to
+	// remove it in the next major release
+	cmd.Flags().
+		BoolVar(&r.clusterUseDiscoveryV1, "cluster.use-discovery-v1", r.clusterUseDiscoveryV1, "Use the older, v1 version of cluster peers discovery. Note that this flag will be deprecated in the future and eventually removed.")
 
 	// Config flags
 	cmd.Flags().StringVar(&r.configFormat, "config.format", r.configFormat, fmt.Sprintf("The format of the source file. Supported formats: %s.", supportedFormatsList()))
@@ -138,6 +146,7 @@ depending on the nature of the reload error.
 		BoolVar(&r.disableReporting, "disable-reporting", r.disableReporting, "Disable reporting of enabled components to Grafana.")
 	cmd.Flags().StringVar(&r.storagePath, "storage.path", r.storagePath, "Base directory where components can store data")
 	cmd.Flags().Var(&r.minStability, "stability.level", fmt.Sprintf("Minimum stability level of features to enable. Supported values: %s", strings.Join(featuregate.AllowedValues(), ", ")))
+	cmd.Flags().BoolVar(&r.enableCommunityComps, "feature.community-components.enabled", r.enableCommunityComps, "Enable community components.")
 	return cmd
 }
 
@@ -156,11 +165,13 @@ type alloyRun struct {
 	clusterDiscoverPeers         string
 	clusterAdvInterfaces         []string
 	clusterRejoinInterval        time.Duration
-	ClusterMaxJoinPeers          int
+	clusterMaxJoinPeers          int
 	clusterName                  string
+	clusterUseDiscoveryV1        bool
 	configFormat                 string
 	configBypassConversionErrors bool
 	configExtraArgs              string
+	enableCommunityComps         bool
 }
 
 func (fr *alloyRun) Run(configPath string) error {
@@ -192,6 +203,12 @@ func (fr *alloyRun) Run(configPath string) error {
 
 	level.Info(l).Log("boringcrypto enabled", boringcrypto.Enabled)
 
+	// Set the memory limit, this will honor GOMEMLIMIT if set
+	// If there is a cgroup will follow that
+	if fr.minStability.Permits(featuregate.StabilityPublicPreview) {
+		memlimit.SetGoMemLimitWithOpts(memlimit.WithLogger(slog.New(l.Handler())))
+	}
+
 	// Enable the profiling.
 	setMutexBlockProfiling(l)
 
@@ -219,12 +236,12 @@ func (fr *alloyRun) Run(configPath string) error {
 	// To work around this, we lazily create variables for the functions the HTTP
 	// service needs and set them after the Alloy controller exists.
 	var (
-		reload func() (*alloy.Source, error)
+		reload func() (*alloy_runtime.Source, error)
 		ready  func() bool
 	)
 
 	clusterService, err := buildClusterService(clusterOptions{
-		Log:     l,
+		Log:     log.With(l, "service", "cluster"),
 		Tracer:  t,
 		Metrics: reg,
 
@@ -236,8 +253,11 @@ func (fr *alloyRun) Run(configPath string) error {
 		DiscoverPeers:       fr.clusterDiscoverPeers,
 		RejoinInterval:      fr.clusterRejoinInterval,
 		AdvertiseInterfaces: fr.clusterAdvInterfaces,
-		ClusterMaxJoinPeers: fr.ClusterMaxJoinPeers,
+		ClusterMaxJoinPeers: fr.clusterMaxJoinPeers,
 		ClusterName:         fr.clusterName,
+		//TODO(alloy/#1274): graduate to GA once we have more confidence in this feature
+		EnableStateUpdatesLimiter: fr.minStability.Permits(featuregate.StabilityPublicPreview),
+		EnableDiscoveryV2:         !fr.clusterUseDiscoveryV1,
 	})
 	if err != nil {
 		return err
@@ -249,7 +269,7 @@ func (fr *alloyRun) Run(configPath string) error {
 		Gatherer: prometheus.DefaultGatherer,
 
 		ReadyFunc:  func() bool { return ready() },
-		ReloadFunc: func() (*alloy.Source, error) { return reload() },
+		ReloadFunc: func() (*alloy_runtime.Source, error) { return reload() },
 
 		HTTPListenAddr:   fr.httpListenAddr,
 		MemoryListenAddr: fr.inMemoryAddr,
@@ -259,13 +279,17 @@ func (fr *alloyRun) Run(configPath string) error {
 	remoteCfgService, err := remotecfgservice.New(remotecfgservice.Options{
 		Logger:      log.With(l, "service", "remotecfg"),
 		StoragePath: fr.storagePath,
+		Metrics:     reg,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create the remotecfg service: %w", err)
 	}
 
+	liveDebuggingService := livedebugging.New()
+
 	uiService := uiservice.New(uiservice.Options{
-		UIPrefix: fr.uiPrefix,
+		UIPrefix:        fr.uiPrefix,
+		CallbackManager: liveDebuggingService.Data().(livedebugging.CallbackManager),
 	})
 
 	otelService := otel_service.New(l)
@@ -276,24 +300,26 @@ func (fr *alloyRun) Run(configPath string) error {
 	labelService := labelstore.New(l, reg)
 	alloyseed.Init(fr.storagePath, l)
 
-	f := alloy.New(alloy.Options{
-		Logger:       l,
-		Tracer:       t,
-		DataPath:     fr.storagePath,
-		Reg:          reg,
-		MinStability: fr.minStability,
+	f := alloy_runtime.New(alloy_runtime.Options{
+		Logger:               l,
+		Tracer:               t,
+		DataPath:             fr.storagePath,
+		Reg:                  reg,
+		MinStability:         fr.minStability,
+		EnableCommunityComps: fr.enableCommunityComps,
 		Services: []service.Service{
-			httpService,
-			uiService,
 			clusterService,
-			otelService,
+			httpService,
 			labelService,
+			liveDebuggingService,
+			otelService,
 			remoteCfgService,
+			uiService,
 		},
 	})
 
 	ready = f.Ready
-	reload = func() (*alloy.Source, error) {
+	reload = func() (*alloy_runtime.Source, error) {
 		alloySource, err := loadAlloySource(configPath, fr.configFormat, fr.configBypassConversionErrors, fr.configExtraArgs)
 		defer instrumentation.InstrumentSHA256(alloySource.SHA256())
 		defer instrumentation.InstrumentLoad(err == nil)
@@ -382,7 +408,7 @@ func (fr *alloyRun) Run(configPath string) error {
 }
 
 // getEnabledComponentsFunc returns a function that gets the current enabled components
-func getEnabledComponentsFunc(f *alloy.Alloy) func() map[string]interface{} {
+func getEnabledComponentsFunc(f *alloy_runtime.Runtime) func() map[string]interface{} {
 	return func() map[string]interface{} {
 		components := component.GetAllComponents(f, component.InfoOptions{})
 		componentNames := map[string]struct{}{}
@@ -396,7 +422,7 @@ func getEnabledComponentsFunc(f *alloy.Alloy) func() map[string]interface{} {
 	}
 }
 
-func loadAlloySource(path string, converterSourceFormat string, converterBypassErrors bool, configExtraArgs string) (*alloy.Source, error) {
+func loadAlloySource(path string, converterSourceFormat string, converterBypassErrors bool, configExtraArgs string) (*alloy_runtime.Source, error) {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return nil, err
@@ -428,7 +454,7 @@ func loadAlloySource(path string, converterSourceFormat string, converterBypassE
 			return nil, err
 		}
 
-		return alloy.ParseSources(sources)
+		return alloy_runtime.ParseSources(sources)
 	}
 
 	bb, err := os.ReadFile(path)
@@ -452,7 +478,7 @@ func loadAlloySource(path string, converterSourceFormat string, converterBypassE
 
 	instrumentation.InstrumentConfig(bb)
 
-	return alloy.ParseSource(path, bb)
+	return alloy_runtime.ParseSource(path, bb)
 }
 
 func interruptContext() (context.Context, context.CancelFunc) {

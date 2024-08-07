@@ -8,17 +8,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/grafana/alloy/internal/alloy/componenttest"
-	"github.com/grafana/alloy/internal/alloy/logging/level"
 	"github.com/grafana/alloy/internal/component/otelcol"
+	otelcolCfg "github.com/grafana/alloy/internal/component/otelcol/config"
 	"github.com/grafana/alloy/internal/component/otelcol/internal/fakeconsumer"
 	"github.com/grafana/alloy/internal/component/otelcol/receiver/otlp"
+	"github.com/grafana/alloy/internal/runtime/componenttest"
+	"github.com/grafana/alloy/internal/runtime/logging/level"
 	"github.com/grafana/alloy/internal/util"
 	"github.com/grafana/alloy/syntax"
 	"github.com/grafana/dskit/backoff"
 	"github.com/phayes/freeport"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/config/configgrpc"
+	"go.opentelemetry.io/collector/config/confighttp"
+	"go.opentelemetry.io/collector/config/confignet"
 	"go.opentelemetry.io/collector/pdata/ptrace"
+	"go.opentelemetry.io/collector/receiver/otlpreceiver"
 	"gotest.tools/assert"
 )
 
@@ -123,6 +128,43 @@ func getFreeAddr(t *testing.T) string {
 	return fmt.Sprintf("localhost:%d", portNumber)
 }
 
+func TestUnmarshalDefault(t *testing.T) {
+	alloyCfg := `
+		http {}
+		grpc {}
+		output {}
+	`
+	var args otlp.Arguments
+	err := syntax.Unmarshal([]byte(alloyCfg), &args)
+	require.NoError(t, err)
+
+	actual, err := args.Convert()
+	require.NoError(t, err)
+
+	expected := otlpreceiver.Config{
+		Protocols: otlpreceiver.Protocols{
+			GRPC: &configgrpc.ServerConfig{
+				NetAddr: confignet.AddrConfig{
+					Endpoint:  "0.0.0.0:4317",
+					Transport: "tcp",
+				},
+				ReadBufferSize: 524288,
+			},
+			HTTP: &otlpreceiver.HTTPConfig{
+				ServerConfig: &confighttp.ServerConfig{
+					Endpoint:              "0.0.0.0:4318",
+					CompressionAlgorithms: []string{"", "gzip", "zstd", "zlib", "snappy", "deflate"},
+				},
+				TracesURLPath:  "/v1/traces",
+				MetricsURLPath: "/v1/metrics",
+				LogsURLPath:    "/v1/logs",
+			},
+		},
+	}
+
+	require.Equal(t, &expected, actual)
+}
+
 func TestUnmarshalGrpc(t *testing.T) {
 	alloyCfg := `
 		grpc {
@@ -178,7 +220,7 @@ func TestDebugMetricsConfig(t *testing.T) {
 	tests := []struct {
 		testName string
 		alloyCfg string
-		expected otelcol.DebugMetricsArguments
+		expected otelcolCfg.DebugMetricsArguments
 	}{
 		{
 			testName: "default",
@@ -188,8 +230,9 @@ func TestDebugMetricsConfig(t *testing.T) {
 			}
 			output {}
 			`,
-			expected: otelcol.DebugMetricsArguments{
+			expected: otelcolCfg.DebugMetricsArguments{
 				DisableHighCardinalityMetrics: true,
+				Level:                         otelcolCfg.LevelDetailed,
 			},
 		},
 		{
@@ -203,8 +246,9 @@ func TestDebugMetricsConfig(t *testing.T) {
 			}
 			output {}
 			`,
-			expected: otelcol.DebugMetricsArguments{
+			expected: otelcolCfg.DebugMetricsArguments{
 				DisableHighCardinalityMetrics: false,
+				Level:                         otelcolCfg.LevelDetailed,
 			},
 		},
 		{
@@ -218,8 +262,9 @@ func TestDebugMetricsConfig(t *testing.T) {
 			}
 			output {}
 			`,
-			expected: otelcol.DebugMetricsArguments{
+			expected: otelcolCfg.DebugMetricsArguments{
 				DisableHighCardinalityMetrics: true,
+				Level:                         otelcolCfg.LevelDetailed,
 			},
 		},
 	}

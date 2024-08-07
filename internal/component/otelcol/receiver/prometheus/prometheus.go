@@ -12,9 +12,12 @@ import (
 	"github.com/grafana/alloy/internal/build"
 	"github.com/grafana/alloy/internal/component"
 	"github.com/grafana/alloy/internal/component/otelcol"
+	otelcolCfg "github.com/grafana/alloy/internal/component/otelcol/config"
 	"github.com/grafana/alloy/internal/component/otelcol/internal/fanoutconsumer"
+	"github.com/grafana/alloy/internal/component/otelcol/internal/livedebuggingconsumer"
 	"github.com/grafana/alloy/internal/component/otelcol/receiver/prometheus/internal"
 	"github.com/grafana/alloy/internal/featuregate"
+	"github.com/grafana/alloy/internal/service/livedebugging"
 	"github.com/grafana/alloy/internal/util/zapadapter"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
@@ -41,6 +44,13 @@ func init() {
 type Arguments struct {
 	// Output configures where to send received data. Required.
 	Output *otelcol.ConsumerArguments `alloy:"output,block"`
+	// DebugMetrics configures component internal metrics. Optional.
+	DebugMetrics otelcolCfg.DebugMetricsArguments `alloy:"debug_metrics,block,optional"`
+}
+
+// SetToDefault implements syntax.Defaulter.
+func (args *Arguments) SetToDefault() {
+	args.DebugMetrics.SetToDefault()
 }
 
 // Exports are the set of fields exposed by the otelcol.receiver.prometheus
@@ -57,15 +67,28 @@ type Component struct {
 	mut        sync.RWMutex
 	cfg        Arguments
 	appendable storage.Appendable
+
+	liveDebuggingConsumer *livedebuggingconsumer.Consumer
+	debugDataPublisher    livedebugging.DebugDataPublisher
 }
 
-var _ component.Component = (*Component)(nil)
+var (
+	_ component.Component     = (*Component)(nil)
+	_ component.LiveDebugging = (*Component)(nil)
+)
 
 // New creates a new otelcol.receiver.prometheus component.
 func New(o component.Options, c Arguments) (*Component, error) {
+	debugDataPublisher, err := o.GetServiceData(livedebugging.ServiceName)
+	if err != nil {
+		return nil, err
+	}
+
 	res := &Component{
-		log:  o.Logger,
-		opts: o,
+		log:                   o.Logger,
+		opts:                  o,
+		liveDebuggingConsumer: livedebuggingconsumer.New(debugDataPublisher.(livedebugging.DebugDataPublisher), o.ID),
+		debugDataPublisher:    debugDataPublisher.(livedebugging.DebugDataPublisher),
 	}
 
 	if err := res.Update(c); err != nil {
@@ -110,18 +133,24 @@ func (c *Component) Update(newConfig component.Arguments) error {
 		// When supported, this could be added as an arg.
 		trimMetricSuffixes = false
 
+		enableNativeHistograms = c.opts.MinStability.Permits(featuregate.StabilityPublicPreview)
+
 		gcInterval = 5 * time.Minute
 	)
+
+	metricsLevel, err := cfg.DebugMetrics.Level.Convert()
+	if err != nil {
+		return err
+	}
+
 	settings := otelreceiver.CreateSettings{
-
-		ID: otelcomponent.NewID(otelcomponent.Type(c.opts.ID)),
-
 		TelemetrySettings: otelcomponent.TelemetrySettings{
 			Logger: zapadapter.New(c.opts.Logger),
 
 			// TODO(tpaschalis): expose tracing and logging statistics.
 			TracerProvider: traceNoop.NewTracerProvider(),
 			MeterProvider:  metricNoop.NewMeterProvider(),
+			MetricsLevel:   metricsLevel,
 
 			ReportStatus: func(*otelcomponent.StatusEvent) {},
 		},
@@ -132,7 +161,11 @@ func (c *Component) Update(newConfig component.Arguments) error {
 			Version:     build.Version,
 		},
 	}
-	metricsSink := fanoutconsumer.Metrics(cfg.Output.Metrics)
+	metrics := cfg.Output.Metrics
+	if c.debugDataPublisher.IsActive(livedebugging.ComponentID(c.opts.ID)) {
+		metrics = append(metrics, c.liveDebuggingConsumer)
+	}
+	metricsSink := fanoutconsumer.Metrics(metrics)
 
 	appendable, err := internal.NewAppendable(
 		metricsSink,
@@ -141,6 +174,7 @@ func (c *Component) Update(newConfig component.Arguments) error {
 		useStartTimeMetric,
 		startTimeMetricRegex,
 		useCreatedMetric,
+		enableNativeHistograms,
 		labels.Labels{},
 		trimMetricSuffixes,
 	)
@@ -153,4 +187,8 @@ func (c *Component) Update(newConfig component.Arguments) error {
 	c.opts.OnStateChange(Exports{Receiver: c.appendable})
 
 	return nil
+}
+
+func (c *Component) LiveDebugging(_ int) {
+	c.Update(c.cfg)
 }

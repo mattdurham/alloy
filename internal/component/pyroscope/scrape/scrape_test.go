@@ -3,6 +3,7 @@ package scrape
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/grafana/alloy/internal/component/prometheus/scrape"
 	"github.com/grafana/alloy/internal/component/pyroscope"
 	"github.com/grafana/alloy/internal/service/cluster"
+	http_service "github.com/grafana/alloy/internal/service/http"
 	"github.com/grafana/alloy/internal/util"
 	"github.com/grafana/alloy/syntax"
 	"github.com/prometheus/client_golang/prometheus"
@@ -69,6 +71,13 @@ func getServiceData(name string) (interface{}, error) {
 	switch name {
 	case cluster.ServiceName:
 		return cluster.Mock(), nil
+	case http_service.ServiceName:
+		return http_service.Data{
+			HTTPListenAddr:   "localhost:12345",
+			MemoryListenAddr: "alloy.internal:1245",
+			BaseHTTPPath:     "/",
+			DialFunc:         (&net.Dialer{}).DialContext,
+		}, nil
 	default:
 		return nil, fmt.Errorf("unrecognized service name %q", name)
 	}
@@ -151,6 +160,26 @@ func TestUnmarshalConfig(t *testing.T) {
 			`,
 			expectedErr: "scrape_interval must be at least 2 seconds when using delta profiling",
 		},
+		"invalid cpu delta_profiling_duration": {
+			in: `
+			targets    = []
+			forward_to = null
+			scrape_timeout = "1s"
+			scrape_interval = "10s"
+			delta_profiling_duration = "1s"
+			`,
+			expectedErr: "delta_profiling_duration must be larger than 1 second when using delta profiling",
+		},
+		"erroneous cpu delta_profiling_duration": {
+			in: `
+			targets    = []
+			forward_to = null
+			scrape_timeout = "1s"
+			scrape_interval = "10s"
+			delta_profiling_duration = "12s"
+			`,
+			expectedErr: "delta_profiling_duration must be at least 1 second smaller than scrape_interval when using delta profiling",
+		},
 		"allow short scrape_intervals without delta": {
 			in: `
 			targets    = []
@@ -175,7 +204,8 @@ func TestUnmarshalConfig(t *testing.T) {
 			targets    = []
 			forward_to = null
 			scrape_timeout = "5s"
-			scrape_interval = "2s"
+			scrape_interval = "3s"
+			delta_profiling_duration = "2s"
 			bearer_token = "token"
 			bearer_token_file = "/path/to/file.token"
 			`,

@@ -7,20 +7,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/grafana/alloy/internal/alloy/componenttest"
+	"github.com/grafana/loki/v3/pkg/logproto"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/common/model"
+	"github.com/prometheus/prometheus/model/relabel"
+	"github.com/stretchr/testify/require"
+
 	"github.com/grafana/alloy/internal/component"
 	"github.com/grafana/alloy/internal/component/common/loki"
 	alloy_relabel "github.com/grafana/alloy/internal/component/common/relabel"
 	"github.com/grafana/alloy/internal/component/discovery"
 	lsf "github.com/grafana/alloy/internal/component/loki/source/file"
+	"github.com/grafana/alloy/internal/runtime/componenttest"
+	"github.com/grafana/alloy/internal/service/livedebugging"
 	"github.com/grafana/alloy/internal/util"
 	"github.com/grafana/alloy/syntax"
-	"github.com/grafana/loki/pkg/logproto"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/common/model"
-	"github.com/prometheus/prometheus/model/relabel"
-
-	"github.com/stretchr/testify/require"
 )
 
 // Rename the kubernetes_(.*) labels without the suffix and remove them,
@@ -55,9 +56,10 @@ func TestRelabeling(t *testing.T) {
 
 	// Create and run the component, so that it relabels and forwards logs.
 	opts := component.Options{
-		Logger:        util.TestAlloyLogger(t),
-		Registerer:    prometheus.NewRegistry(),
-		OnStateChange: func(e component.Exports) {},
+		Logger:         util.TestAlloyLogger(t),
+		Registerer:     prometheus.NewRegistry(),
+		OnStateChange:  func(e component.Exports) {},
+		GetServiceData: getServiceData,
 	}
 	args := Arguments{
 		ForwardTo:      []loki.LogsReceiver{ch1, ch2},
@@ -116,9 +118,10 @@ func BenchmarkRelabelComponent(b *testing.B) {
 
 	// Create and run the component, so that it relabels and forwards logs.
 	opts := component.Options{
-		Logger:        util.TestAlloyLogger(b),
-		Registerer:    prometheus.NewRegistry(),
-		OnStateChange: func(e component.Exports) {},
+		Logger:         util.TestAlloyLogger(b),
+		Registerer:     prometheus.NewRegistry(),
+		OnStateChange:  func(e component.Exports) {},
+		GetServiceData: getServiceData,
 	}
 	args := Arguments{
 		ForwardTo:      []loki.LogsReceiver{ch1},
@@ -164,9 +167,10 @@ func TestCache(t *testing.T) {
 
 	// Create and run the component, so that it relabels and forwards logs.
 	opts := component.Options{
-		Logger:        util.TestAlloyLogger(t),
-		Registerer:    prometheus.NewRegistry(),
-		OnStateChange: func(e component.Exports) {},
+		Logger:         util.TestAlloyLogger(t),
+		Registerer:     prometheus.NewRegistry(),
+		OnStateChange:  func(e component.Exports) {},
+		GetServiceData: getServiceData,
 	}
 	args := Arguments{
 		ForwardTo: []loki.LogsReceiver{ch1},
@@ -432,5 +436,14 @@ func getEntry() loki.Entry {
 			Timestamp: time.Now(),
 			Line:      "very important log",
 		},
+	}
+}
+
+func getServiceData(name string) (interface{}, error) {
+	switch name {
+	case livedebugging.ServiceName:
+		return livedebugging.NewLiveDebugging(), nil
+	default:
+		return nil, fmt.Errorf("service not found %s", name)
 	}
 }

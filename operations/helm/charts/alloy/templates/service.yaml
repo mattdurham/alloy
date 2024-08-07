@@ -6,6 +6,7 @@ metadata:
   name: {{ include "alloy.fullname" . }}
   labels:
     {{- include "alloy.labels" . | nindent 4 }}
+    app.kubernetes.io/component: networking
   {{- with .Values.service.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -17,7 +18,9 @@ spec:
   {{- end }}
   selector:
     {{- include "alloy.selectorLabels" . | nindent 4 }}
+  {{- if semverCompare ">=1.26-0" .Capabilities.KubeVersion.Version }}
   internalTrafficPolicy: {{.Values.service.internalTrafficPolicy}}
+  {{- end }}
   ports:
     - name: http-metrics
       {{- if eq .Values.service.type "NodePort" }}

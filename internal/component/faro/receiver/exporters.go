@@ -3,18 +3,20 @@ package receiver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-logfmt/logfmt"
-	"github.com/grafana/alloy/internal/alloy/logging/level"
+	"github.com/grafana/loki/v3/pkg/logproto"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/common/model"
+
 	"github.com/grafana/alloy/internal/component/common/loki"
 	"github.com/grafana/alloy/internal/component/faro/receiver/internal/payload"
 	"github.com/grafana/alloy/internal/component/otelcol"
-	"github.com/grafana/loki/pkg/logproto"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/common/model"
+	"github.com/grafana/alloy/internal/runtime/logging/level"
 )
 
 type exporter interface {
@@ -158,7 +160,7 @@ func (exp *logsExporter) sendKeyValsToLogsPipeline(ctx context.Context, kv *payl
 	}
 
 	ent := loki.Entry{
-		Labels: exp.labelSet(),
+		Labels: exp.labelSet(kv),
 		Entry: logproto.Entry{
 			Timestamp: time.Now(),
 			Line:      string(line),
@@ -180,10 +182,23 @@ func (exp *logsExporter) sendKeyValsToLogsPipeline(ctx context.Context, kv *payl
 	return nil
 }
 
-func (exp *logsExporter) labelSet() model.LabelSet {
+func (exp *logsExporter) labelSet(kv *payload.KeyVal) model.LabelSet {
 	exp.labelsMut.RLock()
 	defer exp.labelsMut.RUnlock()
-	return exp.labels
+
+	// Attach extra label to log lines
+	set := make(model.LabelSet, len(exp.labels))
+	for k, v := range exp.labels {
+		if len(v) > 0 {
+			set[k] = v
+		} else {
+			if val, ok := kv.Get(string(k)); ok {
+				set[k] = model.LabelValue(fmt.Sprint(val))
+			}
+		}
+	}
+
+	return set
 }
 
 func (exp *logsExporter) SetLabels(newLabels map[string]string) {

@@ -12,19 +12,19 @@ import (
 	"time"
 
 	"github.com/go-kit/log"
-	"github.com/grafana/alloy/internal/alloy/logging/level"
 	"github.com/grafana/alloy/internal/component"
 	"github.com/grafana/alloy/internal/component/common/kubernetes"
 	"github.com/grafana/alloy/internal/component/common/loki"
 	"github.com/grafana/alloy/internal/component/common/loki/positions"
 	"github.com/grafana/alloy/internal/featuregate"
 	"github.com/grafana/alloy/internal/runner"
+	"github.com/grafana/alloy/internal/runtime/logging/level"
 	"github.com/oklog/run"
 	"k8s.io/client-go/rest"
 )
 
 // Generous timeout period for configuring informers
-const informerSyncTimeout = 10 * time.Second
+const informerSyncTimeout = 10 * time.Minute
 
 func init() {
 	component.Register(component.Registration{

@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/go-kit/log"
-	"github.com/grafana/alloy/internal/alloy/logging/level"
 	"github.com/grafana/alloy/internal/component/pyroscope"
+	"github.com/grafana/alloy/internal/runtime/logging/level"
 	"github.com/grafana/alloy/internal/useragent"
 	commonconfig "github.com/prometheus/common/config"
 	"github.com/prometheus/prometheus/discovery/targetgroup"
@@ -37,8 +37,8 @@ type scrapePool struct {
 	droppedTargets []*Target
 }
 
-func newScrapePool(cfg Arguments, appendable pyroscope.Appendable, logger log.Logger) (*scrapePool, error) {
-	scrapeClient, err := commonconfig.NewClientFromConfig(*cfg.HTTPClientConfig.Convert(), cfg.JobName)
+func newScrapePool(hco []commonconfig.HTTPClientOption, cfg Arguments, appendable pyroscope.Appendable, logger log.Logger) (*scrapePool, error) {
+	scrapeClient, err := commonconfig.NewClientFromConfig(*cfg.HTTPClientConfig.Convert(), cfg.JobName, hco...)
 	if err != nil {
 		return nil, err
 	}
