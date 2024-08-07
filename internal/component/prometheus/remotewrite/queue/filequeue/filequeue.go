@@ -14,7 +14,6 @@ import (
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	"golang.design/x/chann"
 )
 
@@ -78,7 +77,6 @@ func (q *queue) Add(meta map[string]string, data []byte) (string, error) {
 	}
 	q.maxIndex++
 	name := filepath.Join(q.directory, fmt.Sprintf("%d.committed", q.maxIndex))
-	level.Debug(q.logger).Log("msg", "adding bytes", "len", len(data), "name", name)
 	// record wraps the data and metadata in one. This allows the consumer to take action based on the map.
 	r := &Record{
 		Meta: meta,
@@ -106,8 +104,6 @@ func (q *queue) Next(ctx context.Context, enc []byte) (map[string]string, []byte
 		if err != nil {
 			return nil, nil, "", err
 		}
-		level.Debug(q.logger).Log("msg", "reading bytes", "len", len(buf), "name", name)
-
 		r := &Record{}
 		err = cbor.Unmarshal(buf, r)
 		if err != nil {

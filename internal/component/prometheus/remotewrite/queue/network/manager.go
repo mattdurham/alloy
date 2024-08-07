@@ -35,7 +35,7 @@ type ConnectionConfig struct {
 	FlushDuration           time.Duration
 }
 
-func New(ctx context.Context, cc ConnectionConfig, connectionCount uint64, logger log.Logger, seriesStats, metadataStats func(types.Stats)) (types.NetworkClient, error) {
+func New(ctx context.Context, cc ConnectionConfig, connectionCount uint64, logger log.Logger, seriesStats, metadataStats func(types.NetworkStats)) (types.NetworkClient, error) {
 	s := &manager{
 		connectionCount: connectionCount,
 		loops:           make([]*loop, 0),

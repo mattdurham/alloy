@@ -2,6 +2,7 @@ package cbor
 
 import (
 	"fmt"
+	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 	"time"
 
 	"github.com/go-kit/log"
@@ -22,11 +23,12 @@ type appender struct {
 	metadata  []*Raw
 	logger    log.Logger
 	batchSize int
+	stats     func(s types.FileQueueStats)
 }
 
 // NewAppender returns an Appender that writes to a given serializer. NOTE the Appender returned writes
-// data immedietly and does not honor commit or rollback.
-func NewAppender(ttl time.Duration, s *Serializer, batchSize int, logger log.Logger) storage.Appender {
+// data immediately and does not honor commit or rollback.
+func NewAppender(ttl time.Duration, s *Serializer, batchSize int, stats func(s types.FileQueueStats), logger log.Logger) storage.Appender {
 	app := &appender{
 		ttl:      ttl,
 		s:        s,
@@ -40,6 +42,7 @@ func NewAppender(ttl time.Duration, s *Serializer, batchSize int, logger log.Log
 			Histograms: make([]prompb.Histogram, 0),
 		},
 		batchSize: batchSize,
+		stats:     stats,
 	}
 	return app
 }
@@ -82,6 +85,10 @@ func (a *appender) Append(ref storage.SeriesRef, l labels.Labels, t int64, v flo
 		}
 		a.data = a.data[:0]
 	}
+	a.stats(types.FileQueueStats{
+		SeriesStored:    1,
+		NewestTimestamp: t,
+	})
 	a.resetTS()
 	return ref, nil
 }
@@ -126,6 +133,8 @@ func (a *appender) AppendExemplar(ref storage.SeriesRef, l labels.Labels, e exem
 		TS:    ex.Timestamp,
 		Bytes: data,
 	})
+
+	a.resetTS()
 	return ref, nil
 }
 
@@ -155,6 +164,10 @@ func (a *appender) AppendHistogram(ref storage.SeriesRef, l labels.Labels, t int
 		Hash:  hash,
 		TS:    t,
 		Bytes: data,
+	})
+	a.stats(types.FileQueueStats{
+		SeriesStored:    1,
+		NewestTimestamp: t,
 	})
 	a.resetTS()
 	return ref, nil

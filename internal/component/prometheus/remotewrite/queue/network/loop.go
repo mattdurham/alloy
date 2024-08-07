@@ -32,7 +32,7 @@ type loop struct {
 	buf        []byte
 	ch         *chann.Chann[[]byte]
 	seriesBuf  []prompb.TimeSeries
-	statsFunc  func(s types.Stats)
+	statsFunc  func(s types.NetworkStats)
 	stopCh     chan struct{}
 	stopCalled atomic.Bool
 }
@@ -85,7 +85,7 @@ attempt:
 	start := time.Now()
 	result := l.send(series, attempts)
 	duration := time.Since(start)
-	l.statsFunc(types.Stats{
+	l.statsFunc(types.NetworkStats{
 		SendDuration: duration,
 	})
 	level.Debug(l.log).Log("msg", "sending data result", "attempts", attempts, "successful", result.successful, "err", result.err)
@@ -103,7 +103,7 @@ attempt:
 		l.finishSending()
 		return
 	}
-	l.statsFunc(types.Stats{
+	l.statsFunc(types.NetworkStats{
 		Retries: 1,
 	})
 	if l.stopCalled.Load() {
@@ -172,11 +172,11 @@ func (l *loop) send(series [][]byte, retryCount int) sendResult {
 	// 500 errors are considered recoverable.
 	if resp.StatusCode/100 == 5 || resp.StatusCode == http.StatusTooManyRequests {
 		if resp.StatusCode == http.StatusTooManyRequests {
-			l.statsFunc(types.Stats{
+			l.statsFunc(types.NetworkStats{
 				Retries429: 1,
 			})
 		} else {
-			l.statsFunc(types.Stats{
+			l.statsFunc(types.NetworkStats{
 				Retries5XX: 1,
 			})
 		}
@@ -191,14 +191,25 @@ func (l *loop) send(series [][]byte, retryCount int) sendResult {
 		if scanner.Scan() {
 			line = scanner.Text()
 		}
-		l.statsFunc(types.Stats{
+		l.statsFunc(types.NetworkStats{
 			Fails: 1,
 		})
 		result.err = fmt.Errorf("server returned HTTP status %s: %s", resp.Status, line)
 		return result
 	}
-	l.statsFunc(types.Stats{
-		SeriesSent: len(series),
+
+	// Find the newest
+	var newestTS int64
+	for _, ts := range req.Timeseries {
+		for _, sample := range ts.Samples {
+			if sample.Timestamp > newestTS {
+				newestTS = sample.Timestamp
+			}
+		}
+	}
+	l.statsFunc(types.NetworkStats{
+		SeriesSent:      len(series),
+		NewestTimestamp: newestTS,
 	})
 
 	result.successful = true

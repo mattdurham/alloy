@@ -71,6 +71,7 @@ type Queue struct {
 func (s *Queue) Run(ctx context.Context) error {
 	defer s.fq.Close()
 	stats := types.NewStats("alloy", "queue_series", s.opts.Registerer)
+	stats.BackwardsCompatibility(s.opts.Registerer)
 	meta := types.NewStats("alloy", "queue_metadata", s.opts.Registerer)
 	client, err := network.New(ctx, network.ConnectionConfig{
 		URL:           s.args.Connection.URL,
@@ -80,7 +81,7 @@ func (s *Queue) Run(ctx context.Context) error {
 		FlushDuration: s.args.Connection.FlushDuration,
 		Timeout:       s.args.Connection.Timeout,
 		UserAgent:     "alloy",
-	}, uint64(s.args.Connection.QueueCount), s.log, stats.Update, meta.Update)
+	}, uint64(s.args.Connection.QueueCount), s.log, stats.UpdateNetwork, meta.UpdateNetwork)
 	if err != nil {
 		return err
 	}
@@ -174,7 +175,7 @@ func (s *Queue) Update(args component.Arguments) error {
 			FlushDuration: s.args.Connection.FlushDuration,
 			Timeout:       s.args.Connection.Timeout,
 			UserAgent:     "alloy",
-		}, uint64(s.args.Connection.QueueCount), s.log, s.stat.Update, s.metaStats.Update)
+		}, uint64(s.args.Connection.QueueCount), s.log, s.stat.UpdateNetwork, s.metaStats.UpdateNetwork)
 		if err != nil {
 			return err
 		}
@@ -191,5 +192,5 @@ func (c *Queue) Appender(ctx context.Context) storage.Appender {
 	c.mut.RLock()
 	defer c.mut.RUnlock()
 
-	return cbor.NewAppender(c.args.TTL, c.serializer, c.args.AppenderBatchSize, c.opts.Logger)
+	return cbor.NewAppender(c.args.TTL, c.serializer, c.args.AppenderBatchSize, c.stat.UpdateFileQueue, c.opts.Logger)
 }

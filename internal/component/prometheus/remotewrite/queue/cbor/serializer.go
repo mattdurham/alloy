@@ -128,7 +128,11 @@ func (s *Serializer) store() error {
 		return err
 	}
 	out := snappy.Encode(buffer)
-	_, err = s.queue.Add(nil, out)
+	_, err = s.queue.Add(map[string]string{
+		// product.signal_type.schema.version
+		"version":  "alloy.metrics.simple.v1",
+		"encoding": "snappy",
+	}, out)
 	s.bytesInGroup = 0
 	return err
 }

@@ -6,72 +6,148 @@ import (
 )
 
 type PrometheusStats struct {
-	SeriesSent   prometheus.Counter
-	Failures     prometheus.Counter
-	Retries      prometheus.Counter
-	Retries429   prometheus.Counter
-	Retries5XX   prometheus.Counter
-	SentDuration prometheus.Histogram
-	Errors       prometheus.Counter
+	// Network Stats
+	NetworkSeriesSent                prometheus.Counter
+	NetworkFailures                  prometheus.Counter
+	NetworkRetries                   prometheus.Counter
+	NetworkRetries429                prometheus.Counter
+	NetworkRetries5XX                prometheus.Counter
+	NetworkSentDuration              prometheus.Histogram
+	NetworkErrors                    prometheus.Counter
+	NetworkNewestOutTimeStampSeconds prometheus.Gauge
+
+	// Filequeue Stats
+	FilequeueInSeries                 prometheus.Counter
+	FilequeueNewestInTimeStampSeconds prometheus.Gauge
+	FilequeueErrors                   prometheus.Counter
+
+	// Backwards compatibility metrics
+	RemoteStorageInTimestamp  prometheus.Gauge
+	RemoteStorageOutTimestamp prometheus.Gauge
+	RemoteStorageDuration     prometheus.Histogram
 }
 
 func NewStats(namespace, subsystem string, registry prometheus.Registerer) *PrometheusStats {
 	s := &PrometheusStats{
-		SeriesSent: prometheus.NewCounter(prometheus.CounterOpts{
+		FilequeueInSeries: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: subsystem,
-			Name:      "series_sent",
+			Name:      "filequeue_incoming_series",
 		}),
-		Failures: prometheus.NewCounter(prometheus.CounterOpts{
+		RemoteStorageInTimestamp: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "prometheus_remote_storage_highest_timestamp_in_seconds",
+		}),
+		FilequeueNewestInTimeStampSeconds: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: namespace,
 			Subsystem: subsystem,
-			Name:      "failures",
+			Name:      "filequeue_incoming_timestamp_seconds",
 		}),
-		Retries: prometheus.NewCounter(prometheus.CounterOpts{
+		FilequeueErrors: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: namespace,
 			Subsystem: subsystem,
-			Name:      "retries",
+			Name:      "filequeue_errors",
 		}),
-		Retries429: prometheus.NewCounter(prometheus.CounterOpts{
+		NetworkNewestOutTimeStampSeconds: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: namespace,
 			Subsystem: subsystem,
-			Name:      "retries_429",
+			Name:      "network_timestamp_seconds",
 		}),
-		Retries5XX: prometheus.NewCounter(prometheus.CounterOpts{
+		RemoteStorageOutTimestamp: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "prometheus_remote_storage_queue_highest_sent_timestamp_seconds",
+		}),
+		RemoteStorageDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name: "prometheus_remote_storage_queue_duration_seconds",
+		}),
+		NetworkSeriesSent: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: subsystem,
-			Name:      "retries_5xx",
+			Name:      "network_series_sent",
 		}),
-		SentDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
+		NetworkFailures: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "network_failures",
+		}),
+		NetworkRetries: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "network_retries",
+		}),
+		NetworkRetries429: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "network_retries_429",
+		}),
+		NetworkRetries5XX: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "network_retries_5xx",
+		}),
+		NetworkSentDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Namespace:                   namespace,
 			Subsystem:                   subsystem,
-			Name:                        "duration",
+			Name:                        "network_duration_seconds",
 			NativeHistogramBucketFactor: 1.1,
 		}),
-		Errors: prometheus.NewCounter(prometheus.CounterOpts{
+		NetworkErrors: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: subsystem,
-			Name:      "errors",
+			Name:      "network_errors",
 		}),
 	}
-	registry.MustRegister(s.SentDuration, s.Retries5XX, s.Retries429, s.Retries, s.Failures, s.SeriesSent, s.Errors)
+	registry.MustRegister(
+		s.NetworkSentDuration,
+		s.NetworkRetries5XX,
+		s.NetworkRetries429,
+		s.NetworkRetries,
+		s.NetworkFailures,
+		s.NetworkSeriesSent,
+		s.NetworkErrors,
+		s.NetworkNewestOutTimeStampSeconds,
+		s.FilequeueInSeries,
+		s.FilequeueErrors,
+		s.FilequeueNewestInTimeStampSeconds,
+	)
 	return s
 }
 
-func (s *PrometheusStats) Update(stats Stats) {
-	s.SeriesSent.Add(float64(stats.SeriesSent))
-	s.Retries.Add(float64(stats.Retries))
-	s.Failures.Add(float64(stats.Fails))
-	s.Retries429.Add(float64(stats.Retries429))
-	s.Retries5XX.Add(float64(stats.Retries5XX))
-	s.SentDuration.Observe(float64(stats.SendDuration))
+func (s *PrometheusStats) BackwardsCompatibility(registry prometheus.Registerer) {
+	registry.MustRegister(
+		s.RemoteStorageDuration,
+		s.RemoteStorageInTimestamp,
+		s.RemoteStorageOutTimestamp,
+	)
 }
 
-type Stats struct {
-	SeriesSent   int
-	Fails        int
-	Retries      int
-	Retries429   int
-	Retries5XX   int
-	SendDuration time.Duration
+func (s *PrometheusStats) UpdateNetwork(stats NetworkStats) {
+	s.NetworkSeriesSent.Add(float64(stats.SeriesSent))
+	s.NetworkRetries.Add(float64(stats.Retries))
+	s.NetworkFailures.Add(float64(stats.Fails))
+	s.NetworkRetries429.Add(float64(stats.Retries429))
+	s.NetworkRetries5XX.Add(float64(stats.Retries5XX))
+	s.NetworkSentDuration.Observe(stats.SendDuration.Seconds())
+	s.RemoteStorageDuration.Observe(stats.SendDuration.Seconds())
+	s.RemoteStorageOutTimestamp.Set(float64(stats.NewestTimestamp))
+}
+
+func (s *PrometheusStats) UpdateFileQueue(stats FileQueueStats) {
+	s.FilequeueInSeries.Add(float64(stats.SeriesStored))
+	s.FilequeueErrors.Add(float64(stats.Errors))
+	s.FilequeueNewestInTimeStampSeconds.Set(float64(stats.NewestTimestamp))
+}
+
+type NetworkStats struct {
+	Retries         int
+	Retries429      int
+	Retries5XX      int
+	SendDuration    time.Duration
+	SeriesSent      int
+	Fails           int
+	NewestTimestamp int64
+}
+
+type FileQueueStats struct {
+	SeriesStored    int
+	Errors          int
+	NewestTimestamp int64
 }
