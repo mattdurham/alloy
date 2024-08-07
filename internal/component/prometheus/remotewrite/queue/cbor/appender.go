@@ -26,6 +26,11 @@ type appender struct {
 	stats     func(s types.FileQueueStats)
 }
 
+func (a *appender) AppendCTZeroSample(ref storage.SeriesRef, l labels.Labels, t, ct int64) (storage.SeriesRef, error) {
+	// TODO @mattdurham figure out what to do here later.
+	return ref, nil
+}
+
 // NewAppender returns an Appender that writes to a given serializer. NOTE the Appender returned writes
 // data immediately and does not honor commit or rollback.
 func NewAppender(ttl time.Duration, s *Serializer, batchSize int, stats func(s types.FileQueueStats), logger log.Logger) storage.Appender {
