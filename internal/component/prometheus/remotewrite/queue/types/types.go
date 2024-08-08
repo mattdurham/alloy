@@ -2,11 +2,56 @@ package types
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"time"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/prometheus/prometheus/storage"
 )
+
+type SeriesGroup struct {
+	_        struct{} `cbor:",toarray"`
+	Series   []*Raw   `cbor:"1,keyasint"`
+	Metadata []*Raw   `cbor:"2,keyasint"`
+}
+
+func DeserializeToSeriesGroup(buf []byte) (*SeriesGroup, error) {
+	sg := &SeriesGroup{}
+	decOpt := cbor.DecOptions{
+		MaxArrayElements: math.MaxInt32,
+	}
+	dec, err := decOpt.DecMode()
+	if err != nil {
+		return nil, err
+	}
+	err = dec.Unmarshal(buf, sg)
+	return sg, err
+}
+
+type Raw struct {
+	_     struct{} `cbor:",toarray"`
+	Hash  uint64   `cbor:"1,keyasint"`
+	Bytes []byte   `cbor:"2,keyasint"`
+	TS    int64    `cbor:"3,keyasint"`
+}
+
+type RawMetadata struct {
+	Raw
+}
+type QueueItem struct {
+	Buffer []byte
+	Meta   map[string]string
+}
+
+type NetworkQueueItem struct {
+	Hash   uint64
+	Buffer []byte
+}
+
+type NetworkMetadataItem struct {
+	Buffer []byte
+}
 
 func defaultArgs() Arguments {
 	return Arguments{

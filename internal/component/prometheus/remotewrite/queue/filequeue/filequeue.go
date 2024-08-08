@@ -2,28 +2,28 @@ package filequeue
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/go-kit/log"
-	"golang.design/x/chann"
+	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
+	"github.com/vladopajic/go-actor/actor"
 )
 
+var _ actor.Worker = (*queue)(nil)
+
 type queue struct {
-	mut       sync.RWMutex
+	act       actor.Actor
 	directory string
 	maxIndex  int
 	logger    log.Logger
-	// ch is an unbounded queue. It contains the names of files in the WAL.
-	ch *chann.Chann[string]
+	inbox     actor.Mailbox[types.Data]
+	out       actor.MailboxSender[types.DataHandle]
 }
 
 // Record wraps the input data and combines it with the metadata.
@@ -33,7 +33,7 @@ type Record struct {
 }
 
 // NewQueue returns a implementation of FileStorage.
-func NewQueue(directory string, logger log.Logger) (types.FileStorage, error) {
+func NewQueue(directory string, out actor.MailboxSender[types.DataHandle], logger log.Logger) (types.FileStorage, error) {
 	err := os.MkdirAll(directory, 0777)
 	if err != nil {
 		return nil, err
@@ -58,20 +58,68 @@ func NewQueue(directory string, logger log.Logger) (types.FileStorage, error) {
 		directory: directory,
 		maxIndex:  currentIndex,
 		logger:    logger,
-		ch:        chann.New[string](),
+		out:       out,
+		inbox:     actor.NewMailbox[types.Data](),
 	}
+
+	q.act = actor.Combine(actor.New(q), q.inbox).Build()
+	q.act.Start()
+
 	// Push the files that currently exist to the channel.
 	for _, id := range ids {
-		q.ch.In() <- filepath.Join(directory, fmt.Sprintf("%d.committed", id))
+		q.out.Send(context.Background(), types.DataHandle{
+			Name: filepath.Join(directory, fmt.Sprintf("%d.committed", id)),
+			Get:  get,
+		})
 	}
 	return q, nil
 }
 
-// Add a committed file to the queue.
-func (q *queue) Add(meta map[string]string, data []byte) (string, error) {
-	q.mut.Lock()
-	defer q.mut.Unlock()
+func (q *queue) Mailbox() actor.MailboxSender[types.Data] {
+	return q.inbox
+}
 
+func (q *queue) Stop() {
+	q.act.Stop()
+	q.inbox.Stop()
+}
+
+func get(name string) (map[string]string, []byte, error) {
+	buf, err := readFile(name)
+	defer delete(name)
+	if err != nil {
+		return nil, nil, err
+	}
+	r := &Record{}
+	err = cbor.Unmarshal(buf, r)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return r.Meta, r.Data, nil
+
+}
+
+func (q *queue) DoWork(ctx actor.Context) actor.WorkerStatus {
+	select {
+	case <-ctx.Done():
+		return actor.WorkerEnd
+	case item := <-q.inbox.ReceiveC():
+		name, err := q.add(item.Meta, item.Data)
+		if err != nil {
+			return actor.WorkerContinue
+		}
+		_ = q.out.Send(ctx, types.DataHandle{
+			Name: name,
+			Get:  get,
+		})
+		return actor.WorkerContinue
+	}
+
+}
+
+// Add a committed file to the queue.
+func (q *queue) add(meta map[string]string, data []byte) (string, error) {
 	if meta == nil {
 		meta = make(map[string]string)
 	}
@@ -90,37 +138,10 @@ func (q *queue) Add(meta map[string]string, data []byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// In is an unbounded queue, that contains the names of the user. Chann is 2 goroutines with a slice in the middle.
-	q.ch.In() <- name
 	return name, err
 }
 
-// Next waits for a new entry to be added to the queue. It will block until an entry is returned or the context finished.
-func (q *queue) Next(ctx context.Context, enc []byte) (map[string]string, []byte, string, error) {
-	select {
-	case name := <-q.ch.Out():
-		buf, err := q.readFile(name, enc)
-		defer q.delete(name)
-		if err != nil {
-			return nil, nil, "", err
-		}
-		r := &Record{}
-		err = cbor.Unmarshal(buf, r)
-		if err != nil {
-			return nil, nil, "", err
-		}
-		return r.Meta, r.Data, name, nil
-	case <-ctx.Done():
-		q.ch.Close()
-		return nil, nil, "", errors.New("context done")
-	}
-}
-
-func (q *queue) Close() {
-	q.ch.Close()
-}
-
-func (q *queue) delete(name string) {
+func delete(name string) {
 	_ = os.Remove(name)
 }
 
@@ -128,10 +149,10 @@ func (q *queue) writeFile(name string, data []byte) error {
 	return os.WriteFile(name, data, 0644)
 }
 
-func (q *queue) readFile(name string, enc []byte) ([]byte, error) {
+func readFile(name string) ([]byte, error) {
 	bb, err := os.ReadFile(name)
 	if err != nil {
-		return enc, err
+		return nil, err
 	}
 	return bb, err
 }

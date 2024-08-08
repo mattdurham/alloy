@@ -1,12 +1,11 @@
 package types
 
-import "context"
+import (
+	"github.com/vladopajic/go-actor/actor"
+)
 
 type NetworkClient interface {
-	// Queue will only return false if the underyling context is cancelled, else it will wait until it can queue.
-	Queue(ctx context.Context, hash uint64, data []byte) bool
-	// QueueMetadata will only return false if the underlying context is cancelled, else it will wait until it can queue.
-	QueueMetadata(ctx context.Context, data []byte) bool
-	// Stop drops all pending items and stops.
-	Stop()
+	Mailbox() actor.MailboxSender[NetworkQueueItem]
+
+	MetaMailbox() actor.MailboxSender[NetworkMetadataItem]
 }

@@ -1,95 +1,98 @@
 package cbor
 
 import (
-	"github.com/go-kit/log/level"
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
-	"math"
-	"sync"
 	"time"
 
 	snappy "github.com/eapache/go-xerial-snappy"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
+	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
+	"github.com/vladopajic/go-actor/actor"
 )
 
-type Raw struct {
-	_     struct{} `cbor:",toarray"`
-	Hash  uint64   `cbor:"1,keyasint"`
-	Bytes []byte   `cbor:"2,keyasint"`
-	TS    int64    `cbor:"3,keyasint"`
-}
-
-type SeriesGroup struct {
-	_        struct{} `cbor:",toarray"`
-	Series   []*Raw   `cbor:"1,keyasint"`
-	Metadata []*Raw   `cbor:"2,keyasint"`
-}
-
-func DeserializeToSeriesGroup(buf []byte) (*SeriesGroup, error) {
-	sg := &SeriesGroup{}
-	decOpt := cbor.DecOptions{
-		MaxArrayElements: math.MaxInt32,
-	}
-	dec, err := decOpt.DecMode()
-	if err != nil {
-		return nil, err
-	}
-	err = dec.Unmarshal(buf, sg)
-	return sg, err
-}
-
 type Serializer struct {
-	mut           sync.RWMutex
+	inbox         actor.Mailbox[[]*types.Raw]
+	metaInbox     actor.Mailbox[[]*types.RawMetadata]
 	maxSizeBytes  int
 	flushDuration time.Duration
 	queue         types.FileStorage
-	group         *SeriesGroup
+	group         *types.SeriesGroup
 	lastFlush     time.Time
 	bytesInGroup  uint32
 	logger        log.Logger
+	act           actor.Actor
 }
 
 func NewSerializer(maxSizeBytes int, flushDuration time.Duration, q types.FileStorage, l log.Logger) (*Serializer, error) {
-	return &Serializer{
+	s := &Serializer{
 		maxSizeBytes:  maxSizeBytes,
 		flushDuration: flushDuration,
 		queue:         q,
-		group: &SeriesGroup{
-			Series:   make([]*Raw, 0),
-			Metadata: make([]*Raw, 0),
+		group: &types.SeriesGroup{
+			Series:   make([]*types.Raw, 0),
+			Metadata: make([]*types.Raw, 0),
 		},
-		logger: l,
-	}, nil
+		logger:    l,
+		inbox:     actor.NewMailbox[[]*types.Raw](),
+		metaInbox: actor.NewMailbox[[]*types.RawMetadata](),
+	}
+	s.act = actor.Combine(actor.New(s), s.inbox, s.metaInbox).Build()
+	s.act.Start()
+	return s, nil
 }
 
-func (s *Serializer) AppendMetadata(data []*Raw) error {
+func (s *Serializer) Mailbox() actor.MailboxSender[[]*types.Raw] {
+	return s.inbox
+}
+
+func (s *Serializer) MetaMailbox() actor.MailboxSender[[]*types.RawMetadata] {
+	return s.metaInbox
+}
+
+func (s *Serializer) DoWork(ctx actor.Context) actor.WorkerStatus {
+
+	select {
+	case <-ctx.Done():
+		return actor.WorkerEnd
+	case item, ok := <-s.inbox.ReceiveC():
+		if !ok {
+			return actor.WorkerEnd
+		}
+		s.Append(ctx, item)
+		return actor.WorkerContinue
+	case item, ok := <-s.metaInbox.ReceiveC():
+		if !ok {
+			return actor.WorkerEnd
+		}
+		s.AppendMetadata(ctx, item)
+		return actor.WorkerContinue
+	}
+}
+
+func (s *Serializer) AppendMetadata(ctx actor.Context, data []*types.RawMetadata) error {
 	if len(data) == 0 {
 		return nil
 	}
 
-	s.mut.Lock()
-	defer s.mut.Unlock()
-
 	for _, d := range data {
-		s.group.Metadata = append(s.group.Series, d)
+		s.group.Metadata = append(s.group.Series, &d.Raw)
 		s.bytesInGroup = s.bytesInGroup + uint32(len(d.Bytes)) + 4
 	}
 	// If we would go over the max size then send, or if we have hit the flush duration then send.
 	if s.bytesInGroup > uint32(s.maxSizeBytes) {
 		level.Debug(s.logger).Log("flushing to disk due to maxSizeBytes", s.maxSizeBytes)
-		return s.store()
+		return s.store(ctx)
 	} else if time.Since(s.lastFlush) > s.flushDuration {
-		return s.store()
+		return s.store(ctx)
 	}
 	return nil
 }
 
-func (s *Serializer) Append(data []*Raw) error {
+func (s *Serializer) Append(ctx actor.Context, data []*types.Raw) error {
 	if len(data) == 0 {
 		return nil
 	}
-	s.mut.Lock()
-	defer s.mut.Unlock()
 
 	for _, d := range data {
 		s.group.Series = append(s.group.Series, d)
@@ -98,29 +101,27 @@ func (s *Serializer) Append(data []*Raw) error {
 	// If we would go over the max size then send, or if we have hit the flush duration then send.
 	if s.bytesInGroup > uint32(s.maxSizeBytes) {
 		level.Debug(s.logger).Log("flushing to disk due to maxSizeBytes", s.maxSizeBytes)
-		return s.store()
+		return s.store(ctx)
 	} else if time.Since(s.lastFlush) > s.flushDuration {
-		return s.store()
+		return s.store(ctx)
 	}
 	return nil
 }
 
-func (s *Serializer) Update(flushDuration time.Duration, batchBytes int) {
-	s.mut.Lock()
-	defer s.mut.Unlock()
-
-	s.flushDuration = flushDuration
-	s.maxSizeBytes = batchBytes
+var version = map[string]string{
+	// product.signal_type.schema.version
+	"version":  "alloy.metrics.simple.v1",
+	"encoding": "snappy",
 }
 
-func (s *Serializer) store() error {
+func (s *Serializer) store(ctx actor.Context) error {
 	s.lastFlush = time.Now()
 
 	buffer, err := cbor.Marshal(s.group)
 	// We can reset the group now.
-	s.group = &SeriesGroup{
-		Series:   make([]*Raw, 0),
-		Metadata: make([]*Raw, 0),
+	s.group = &types.SeriesGroup{
+		Series:   make([]*types.Raw, 0),
+		Metadata: make([]*types.Raw, 0),
 	}
 
 	if err != nil {
@@ -128,11 +129,10 @@ func (s *Serializer) store() error {
 		return err
 	}
 	out := snappy.Encode(buffer)
-	_, err = s.queue.Add(map[string]string{
-		// product.signal_type.schema.version
-		"version":  "alloy.metrics.simple.v1",
-		"encoding": "snappy",
-	}, out)
+	err = s.queue.Mailbox().Send(ctx, types.Data{
+		Meta: version,
+		Data: out,
+	})
 	s.bytesInGroup = 0
 	return err
 }

@@ -10,18 +10,24 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 	"github.com/prometheus/prometheus/prompb"
-	"golang.design/x/chann"
+	"github.com/vladopajic/go-actor/actor"
 )
 
 type manager struct {
 	mut             sync.Mutex
 	connectionCount uint64
-	loops           []*loop
-	metadata        *loop
+	loops           []actor.Actor
+	loopsMbx        []actor.Mailbox[[]byte]
+	metadata        actor.Actor
+	metaMbx         actor.Mailbox[[]byte]
 	logger          log.Logger
+	inbox           actor.Mailbox[types.NetworkQueueItem]
+	metaInbox       actor.Mailbox[types.NetworkMetadataItem]
 }
 
 var _ types.NetworkClient = (*manager)(nil)
+
+var _ actor.Worker = (*manager)(nil)
 
 type ConnectionConfig struct {
 	URL                     string
@@ -39,31 +45,37 @@ type ConnectionConfig struct {
 func New(ctx context.Context, cc ConnectionConfig, connectionCount uint64, logger log.Logger, seriesStats, metadataStats func(types.NetworkStats)) (types.NetworkClient, error) {
 	s := &manager{
 		connectionCount: connectionCount,
-		loops:           make([]*loop, 0),
+		loops:           make([]actor.Actor, 0),
+		loopsMbx:        make([]actor.Mailbox[[]byte], 0),
 		logger:          logger,
+		inbox:           actor.NewMailbox[types.NetworkQueueItem](),
 	}
 
 	// start kicks off a number of concurrent connections.
 	var i uint64
 	for ; i < s.connectionCount; i++ {
+		mbx := actor.NewMailbox[[]byte](actor.OptCapacity(2 * cc.BatchCount))
 		l := &loop{
-			batchCount: cc.BatchCount,
-			flushTimer: cc.FlushDuration,
-			client:     &http.Client{},
-			cfg:        cc,
-			pbuf:       proto.NewBuffer(nil),
-			buf:        make([]byte, 0),
-			log:        logger,
-			// We create this with double the batch so that we can always be feeding the queue.
-			ch:             chann.New[[]byte](chann.Cap(cc.BatchCount * 2)),
+			batchCount:     cc.BatchCount,
+			flushTimer:     cc.FlushDuration,
+			client:         &http.Client{},
+			cfg:            cc,
+			pbuf:           proto.NewBuffer(nil),
+			buf:            make([]byte, 0),
+			log:            logger,
 			seriesBuf:      make([]prompb.TimeSeries, 0),
 			statsFunc:      seriesStats,
 			externalLabels: cc.ExternalLabels,
+			seriesMbx:      mbx,
 		}
-		s.loops = append(s.loops, l)
-		go l.runLoop(ctx)
+		mbx.Start()
+		s.loopsMbx = append(s.loopsMbx, mbx)
+		lActor := actor.New(l)
+		s.loops = append(s.loops, lActor)
+		lActor.Start()
 	}
-	s.metadata = &loop{
+
+	s.metadata = actor.New(&loop{
 		batchCount: cc.BatchCount,
 		flushTimer: cc.FlushDuration,
 		client:     &http.Client{},
@@ -71,29 +83,63 @@ func New(ctx context.Context, cc ConnectionConfig, connectionCount uint64, logge
 		pbuf:       proto.NewBuffer(nil),
 		buf:        make([]byte, 0),
 		log:        logger,
-		// We create this with double the batch so that we can always be feeding the queue.
-		ch:        chann.New[[]byte](chann.Cap(cc.BatchCount * 2)),
-		seriesBuf: make([]prompb.TimeSeries, 0),
-		statsFunc: metadataStats,
-	}
+		seriesBuf:  make([]prompb.TimeSeries, 0),
+		statsFunc:  metadataStats,
+		seriesMbx:  actor.NewMailbox[[]byte](),
+	})
+	s.inbox.Start()
 	return s, nil
+}
+
+func (s *manager) Mailbox() actor.MailboxSender[types.NetworkQueueItem] {
+	return s.inbox
+}
+
+func (s *manager) MetaMailbox() actor.MailboxSender[types.NetworkMetadataItem] {
+	return s.metaInbox
+}
+
+func (s *manager) DoWork(ctx actor.Context) actor.WorkerStatus {
+	select {
+	case <-ctx.Done():
+		s.Stop()
+		return actor.WorkerEnd
+	case item, ok := <-s.inbox.ReceiveC():
+		if !ok {
+			return actor.WorkerEnd
+		}
+		s.Queue(ctx, item.Hash, item.Buffer)
+		return actor.WorkerContinue
+	case item, ok := <-s.metaInbox.ReceiveC():
+		if !ok {
+			return actor.WorkerEnd
+		}
+		s.QueueMetadata(ctx, item.Buffer)
+		return actor.WorkerContinue
+	}
 }
 
 func (s *manager) Stop() {
 	for _, l := range s.loops {
-		l.stopCh <- struct{}{}
+		l.Stop()
 	}
+	for _, l := range s.loopsMbx {
+		l.Stop()
+	}
+
+	s.metadata.Stop()
+	s.metaMbx.Stop()
+	s.inbox.Stop()
 }
 
 // Queue adds anything thats not metadata to the queue.
-func (s *manager) Queue(ctx context.Context, hash uint64, d []byte) bool {
+func (s *manager) Queue(ctx context.Context, hash uint64, d []byte) {
 	// Based on a hash which is the label hash add to the queue.
 	queueNum := hash % s.connectionCount
-
-	return s.loops[queueNum].Push(ctx, d)
+	s.loopsMbx[queueNum].Send(ctx, d)
 }
 
 // QueueMetadata adds metadata to the queue.
-func (s *manager) QueueMetadata(ctx context.Context, d []byte) bool {
-	return s.metadata.Push(ctx, d)
+func (s *manager) QueueMetadata(ctx context.Context, d []byte) {
+	s.metaMbx.Send(ctx, d)
 }

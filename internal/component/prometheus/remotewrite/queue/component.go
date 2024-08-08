@@ -54,14 +54,7 @@ type Queue struct {
 // Component.
 func (s *Queue) Run(ctx context.Context) error {
 	for _, ep := range s.args.Connections {
-		fq, err := filequeue.NewQueue(filepath.Join(s.opts.DataPath, ep.Name, "wal"), s.opts.Logger)
-		if err != nil {
-			return err
-		}
-		serial, err := cbor.NewSerializer(s.args.BatchSizeBytes, s.args.FlushDuration, fq, s.opts.Logger)
-		if err != nil {
-			return err
-		}
+
 		reg := prometheus.WrapRegistererWith(prometheus.Labels{"endpoint": ep.Name}, s.opts.Registerer)
 		stats := types.NewStats("alloy", "queue_series", reg)
 		stats.BackwardsCompatibility(reg)
@@ -76,21 +69,27 @@ func (s *Queue) Run(ctx context.Context) error {
 			UserAgent:      "alloy",
 			ExternalLabels: s.args.ExternalLabels,
 		}, uint64(ep.QueueCount), s.log, stats.UpdateNetwork, meta.UpdateNetwork)
-		if err != nil {
-			return err
-		}
+
 		end := &endpoint{
-			fq:         fq,
-			client:     client,
-			serializer: serial,
+			client:     client.Mailbox(),
+			metaClient: client.MetaMailbox(),
 			stat:       stats,
 			metaStats:  meta,
 			ctx:        ctx,
 			log:        s.opts.Logger,
 			ttl:        s.args.TTL,
 		}
+
+		fq, err := filequeue.NewQueue(filepath.Join(s.opts.DataPath, ep.Name, "wal"), end.mbx, s.opts.Logger)
+		if err != nil {
+			return err
+		}
+		serial, err := cbor.NewSerializer(s.args.BatchSizeBytes, s.args.FlushDuration, fq, s.opts.Logger)
+		if err != nil {
+			return err
+		}
+
 		s.endpoints[ep.Name] = end
-		go end.runloop(ctx)
 	}
 	defer func() {
 		s.mut.Lock()
@@ -121,22 +120,6 @@ func (s *Queue) Update(args component.Arguments) error {
 		s.opts.OnStateChange(types.Exports{Receiver: s})
 	})
 	s.args = newArgs
-
-	// 1. Figure out what is new and what is old.
-	newEndpoints := make(map[string]types.ConnectionConfig)
-	deletedEndpoints := make([]string, 0)
-	updatedEndpoints := make(map[string]types.ConnectionConfig)
-	allEndpoints := make(map[string]struct{})
-	for _, newConn := range newArgs.Connections {
-		newEp, found := s.endpoints[newConn.Name]
-		if !found {
-			newEndpoints[newConn.Name] = newConn
-		} else {
-			// Check for update.
-		}
-
-	}
-
 	return nil
 	/*
 		TODO @mattdurham need to cycle through the endpoints figuring out what changed.

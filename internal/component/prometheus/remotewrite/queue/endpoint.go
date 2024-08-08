@@ -2,90 +2,86 @@ package queue
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	snappy "github.com/eapache/go-xerial-snappy"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/cbor"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
 	"github.com/prometheus/prometheus/storage"
-	"go.uber.org/atomic"
+	"github.com/vladopajic/go-actor/actor"
 )
 
+var _ actor.Worker = (*endpoint)(nil)
+
 type endpoint struct {
-	mut        sync.RWMutex
-	fq         types.FileStorage
-	client     types.NetworkClient
-	serializer *cbor.Serializer
+	client     actor.MailboxSender[types.NetworkQueueItem]
+	metaClient actor.MailboxSender[types.NetworkMetadataItem]
 	stat       *types.PrometheusStats
 	metaStats  *types.PrometheusStats
 	log        log.Logger
 	ctx        context.Context
 	ttl        time.Duration
-	done       atomic.Bool
+	mbx        actor.Mailbox[types.DataHandle]
+	buf        []byte
 }
 
-func (ep *endpoint) runloop(ctx context.Context) {
-	buf := make([]byte, 0)
-	var name string
-	var err error
-	for {
-		// If the endpoint is done then we should exit.
-		if ep.done.Load() {
-			return
+func (ep *endpoint) DoWork(ctx actor.Context) actor.WorkerStatus {
+	select {
+	case <-ctx.Done():
+		return actor.WorkerEnd
+	case item, ok := <-ep.mbx.ReceiveC():
+		if !ok {
+			return actor.WorkerEnd
 		}
-		_, buf, name, err = ep.fq.Next(ctx, buf)
+		_, buf, err := item.Get(item.Name)
 		if err != nil {
-			level.Error(ep.log).Log("msg", "error getting next file", "err", err)
-			continue
+			return actor.WorkerEnd
 		}
-
-		buf, err = snappy.Decode(buf)
-		if err != nil {
-			level.Debug(ep.log).Log("msg", "error snappy decoding", "name", name, "err", err)
-			continue
-		}
-		sg, err := cbor.DeserializeToSeriesGroup(buf)
-		if err != nil {
-			level.Debug(ep.log).Log("msg", "error deserializing", "name", name, "err", err)
-			continue
-		}
-		func() {
-			ep.mut.RLock()
-			defer ep.mut.RUnlock()
-
-			for _, series := range sg.Series {
-				// One last chance to check the TTL. Writing to the filequeue will check it but
-				// in a situation where the network is down and writing backs up we dont want to send
-				// data that will get rejected.
-				old := time.Since(time.Unix(series.TS, 0))
-				if old > ep.ttl {
-					continue
-				}
-				successful := ep.client.Queue(ctx, series.Hash, series.Bytes)
-				if !successful {
-					return
-				}
-
-			}
-			for _, md := range sg.Metadata {
-				successful := ep.client.QueueMetadata(ctx, md.Bytes)
-				if !successful {
-					return
-				}
-			}
-		}()
+		ep.handleItem(buf)
+		return actor.WorkerContinue
 	}
 }
 
-func (ep *endpoint) stop() {
-	ep.done.Store(true)
+func (ep *endpoint) handleItem(buf []byte) {
+	var err error
+	ep.buf, err = snappy.Decode(buf)
+	if err != nil {
+		level.Debug(ep.log).Log("msg", "error snappy decoding", "err", err)
+		return
+	}
+	sg, err := types.DeserializeToSeriesGroup(ep.buf)
+	if err != nil {
+		level.Debug(ep.log).Log("msg", "error deserializing", "err", err)
+		return
+	}
+
+	for _, series := range sg.Series {
+		// One last chance to check the TTL. Writing to the filequeue will check it but
+		// in a situation where the network is down and writing backs up we dont want to send
+		// data that will get rejected.
+		old := time.Since(time.Unix(series.TS, 0))
+		if old > ep.ttl {
+			continue
+		}
+		err := ep.client.Send(context.Background(), types.NetworkQueueItem{
+			Hash:   series.Hash,
+			Buffer: series.Bytes,
+		})
+		if err != nil {
+			level.Error(ep.log).Log("msg", "error sending to write client", "err", err)
+		}
+
+	}
+	for _, md := range sg.Metadata {
+		ep.metaClient.Send(context.Background(), types.NetworkMetadataItem{
+			Buffer: md.Bytes,
+		})
+	}
 }
 
 var _ storage.Appender = (*fanout)(nil)

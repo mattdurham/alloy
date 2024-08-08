@@ -5,23 +5,29 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/go-kit/log/level"
 	"io"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 	"github.com/prometheus/prometheus/prompb"
+	"github.com/vladopajic/go-actor/actor"
 	"go.uber.org/atomic"
-	"golang.design/x/chann"
 )
 
+var _ actor.Worker = (*loop)(nil)
+
 // loop handles the low level sending of data. It conceptually a queue.
+// TODO @mattdurham think about if we need to split loop into metadata loop
 type loop struct {
+	configMbx      actor.MailboxReceiver[ConnectionConfig]
+	seriesMbx      actor.MailboxReceiver[[]byte]
+	metaSeriesMbx  actor.MailboxReceiver[[]byte]
 	client         *http.Client
 	batchCount     int
 	flushTimer     time.Duration
@@ -30,51 +36,55 @@ type loop struct {
 	pbuf           *proto.Buffer
 	lastSend       time.Time
 	buf            []byte
-	ch             *chann.Chann[[]byte]
 	seriesBuf      []prompb.TimeSeries
 	statsFunc      func(s types.NetworkStats)
 	stopCh         chan struct{}
 	stopCalled     atomic.Bool
 	externalLabels map[string]string
+	series         [][]byte
 }
 
-func (l *loop) runLoop(ctx context.Context) {
-	series := make([][]byte, 0)
-	for {
-		// This mainly exists so a very low flush time does not steal the select from reading from the out channel.
-		checkTime := time.NewTimer(1 * time.Second)
-		select {
-		case <-ctx.Done():
-			return
-		case <-checkTime.C:
-			if len(series) == 0 {
-				continue
-			}
-			if time.Since(l.lastSend) > l.flushTimer {
-				l.trySend(series)
-				series = series[:0]
-			}
-		case buf := <-l.ch.Out():
-			series = append(series, buf)
-			if len(series) >= l.batchCount {
-				l.trySend(series)
-				series = series[:0]
-			}
-		case <-l.stopCh:
-			return
-		}
-	}
-}
-
-// Push will push to the channel, it will block until it is able to or the context finishes.
-func (l *loop) Push(ctx context.Context, d []byte) bool {
+func (l *loop) DoWork(ctx actor.Context) actor.WorkerStatus {
+	// This first select is to prioritize configuration changes.
 	select {
-	case l.ch.In() <- d:
-		return true
 	case <-ctx.Done():
-		return false
-	case <-l.stopCh:
-		return false
+		return actor.WorkerEnd
+	case cc := <-l.configMbx.ReceiveC():
+		l.cfg = cc
+		return actor.WorkerContinue
+	default:
+	}
+	// Timer is to check the flush.
+	timer := time.NewTimer(1 * time.Second)
+	select {
+	case <-ctx.Done():
+		return actor.WorkerEnd
+	case cc := <-l.configMbx.ReceiveC():
+		l.cfg = cc
+		return actor.WorkerContinue
+	case <-timer.C:
+		if len(l.series) == 0 {
+			return actor.WorkerContinue
+		}
+		if time.Since(l.lastSend) > l.flushTimer {
+			l.trySend(l.series)
+			l.series = l.series[:0]
+		}
+		return actor.WorkerContinue
+	case buf := <-l.seriesMbx.ReceiveC():
+		l.series = append(l.series, buf)
+		if len(l.series) >= l.batchCount {
+			l.trySend(l.series)
+			l.series = l.series[:0]
+		}
+		return actor.WorkerContinue
+	case buf := <-l.metaSeriesMbx.ReceiveC():
+		l.series = append(l.series, buf)
+		if len(l.series) >= l.batchCount {
+			l.trySend(l.series)
+			l.series = l.series[:0]
+		}
+		return actor.WorkerContinue
 	}
 }
 
