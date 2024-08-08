@@ -2,13 +2,14 @@ package filequeue
 
 import (
 	"context"
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 
 	"github.com/go-kit/log"
 	"github.com/stretchr/testify/require"
