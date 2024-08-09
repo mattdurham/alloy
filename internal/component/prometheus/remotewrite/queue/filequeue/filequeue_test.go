@@ -23,7 +23,9 @@ func TestFileQueue(t *testing.T) {
 	mbx := actor.NewMailbox[types.DataHandle]()
 	mbx.Start()
 	defer mbx.Stop()
-	q, err := NewQueue(dir, mbx, log)
+	q, err := NewQueue(dir, func(ctx context.Context, dh types.DataHandle) {
+		_ = mbx.Send(ctx, dh)
+	}, log)
 	require.NoError(t, err)
 	q.Start()
 	defer q.Stop()
@@ -54,7 +56,9 @@ func TestMetaFileQueue(t *testing.T) {
 	mbx := actor.NewMailbox[types.DataHandle]()
 	mbx.Start()
 	defer mbx.Stop()
-	q, err := NewQueue(dir, mbx, log)
+	q, err := NewQueue(dir, func(ctx context.Context, dh types.DataHandle) {
+		_ = mbx.Send(ctx, dh)
+	}, log)
 	q.Start()
 	defer q.Stop()
 	require.NoError(t, err)
@@ -76,7 +80,9 @@ func TestCorruption(t *testing.T) {
 	mbx := actor.NewMailbox[types.DataHandle]()
 	mbx.Start()
 	defer mbx.Stop()
-	q, err := NewQueue(dir, mbx, log)
+	q, err := NewQueue(dir, func(ctx context.Context, dh types.DataHandle) {
+		_ = mbx.Send(ctx, dh)
+	}, log)
 	q.Start()
 	defer q.Stop()
 	require.NoError(t, err)
@@ -116,7 +122,9 @@ func TestFileDeleted(t *testing.T) {
 	mbx := actor.NewMailbox[types.DataHandle]()
 	mbx.Start()
 	defer mbx.Stop()
-	q, err := NewQueue(dir, mbx, log)
+	q, err := NewQueue(dir, func(ctx context.Context, dh types.DataHandle) {
+		_ = mbx.Send(ctx, dh)
+	}, log)
 	q.Start()
 	defer q.Stop()
 	require.NoError(t, err)
@@ -160,7 +168,9 @@ func TestOtherFiles(t *testing.T) {
 	mbx := actor.NewMailbox[types.DataHandle]()
 	mbx.Start()
 	defer mbx.Stop()
-	q, err := NewQueue(dir, mbx, log)
+	q, err := NewQueue(dir, func(ctx context.Context, dh types.DataHandle) {
+		_ = mbx.Send(ctx, dh)
+	}, log)
 	q.Start()
 	defer q.Stop()
 	require.NoError(t, err)
@@ -179,7 +189,9 @@ func TestResuming(t *testing.T) {
 	log := log.NewNopLogger()
 	mbx := actor.NewMailbox[types.DataHandle]()
 	mbx.Start()
-	q, err := NewQueue(dir, mbx, log)
+	q, err := NewQueue(dir, func(ctx context.Context, dh types.DataHandle) {
+		_ = mbx.Send(ctx, dh)
+	}, log)
 	q.Start()
 	require.NoError(t, err)
 
@@ -197,7 +209,9 @@ func TestResuming(t *testing.T) {
 	mbx2 := actor.NewMailbox[types.DataHandle]()
 	mbx2.Start()
 	defer mbx2.Stop()
-	q2, err := NewQueue(dir, mbx2, log)
+	q2, err := NewQueue(dir, func(ctx context.Context, dh types.DataHandle) {
+		_ = mbx2.Send(ctx, dh)
+	}, log)
 	require.NoError(t, err)
 	q2.Start()
 	defer q2.Stop()

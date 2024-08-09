@@ -64,10 +64,14 @@ func BenchmarkSimpleCbor(b *testing.B) {
 				q := &fq{}
 				l := log2.NewNopLogger()
 				wr, err := NewSerializer(32*1024*1024, 500*time.Millisecond, q, l)
+				wr.Start()
+				b.Cleanup(func() {
+					wr.Stop()
+				})
 				require.NoError(b, err)
 				app := NewAppender(1*time.Minute, wr, 100, func(s types.FileQueueStats) {
-
 				}, l)
+
 				tSeries := &ts{
 					v: 0,
 					t: 0,
@@ -146,7 +150,6 @@ func BenchmarkTSDB(b *testing.B) {
 				})
 				runtime.ReadMemStats(&m2)
 				totalMemory = int(m2.HeapInuse - m1.HeapInuse)
-				b.Log("bytes written per metric", humanize.Bytes(uint64(totalBytes/t.metricCount)))
 			}
 			b.Log("bytes written", humanize.Bytes(uint64(totalBytes)))
 			b.Log("bytes written per run", humanize.Bytes(uint64(totalBytes/b.N)), "metric count", t.metricCount)
@@ -194,13 +197,17 @@ type fq struct {
 	totalBytes int
 }
 
-func (f *fq) Add(_ map[string]string, data []byte) (string, error) {
-	f.totalBytes = f.totalBytes + len(data)
-	return "ok", nil
+func (f *fq) Start() {
+
 }
 
-func (f fq) Next(ctx context.Context, enc []byte) (map[string]string, []byte, string, error) {
-	return nil, nil, "", nil
+func (f *fq) Stop() {
+
+}
+
+func (f *fq) Send(ctx context.Context, meta map[string]string, value []byte) error {
+	f.totalBytes = f.totalBytes + len(value)
+	return nil
 }
 
 func (f fq) Delete(_ string) {

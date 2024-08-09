@@ -35,8 +35,8 @@ func NewSerializer(maxSizeBytes int, flushDuration time.Duration, q types.FileSt
 			Metadata: make([]types.Raw, 0),
 		},
 		logger:    l,
-		inbox:     actor.NewMailbox[[]*types.Raw](),
-		metaInbox: actor.NewMailbox[[]*types.RawMetadata](),
+		inbox:     actor.NewMailbox[[]types.Raw](),
+		metaInbox: actor.NewMailbox[[]types.RawMetadata](),
 	}
 
 	return s, nil
