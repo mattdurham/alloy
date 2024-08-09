@@ -19,8 +19,8 @@ import (
 var _ actor.Worker = (*endpoint)(nil)
 
 type endpoint struct {
-	client     actor.MailboxSender[types.NetworkQueueItem]
-	metaClient actor.MailboxSender[types.NetworkMetadataItem]
+	client     types.NetworkClient
+	serializer types.Serializer
 	stat       *types.PrometheusStats
 	metaStats  *types.PrometheusStats
 	log        log.Logger
@@ -28,6 +28,17 @@ type endpoint struct {
 	ttl        time.Duration
 	mbx        actor.Mailbox[types.DataHandle]
 	buf        []byte
+	self       actor.Actor
+}
+
+func (ep *endpoint) Start() {
+	ep.self = actor.Combine(actor.New(ep), ep.mbx).Build()
+	ep.self.Start()
+}
+
+func (ep *endpoint) Stop() {
+	ep.client.Stop()
+	ep.self.Stop()
 }
 
 func (ep *endpoint) DoWork(ctx actor.Context) actor.WorkerStatus {
@@ -68,19 +79,17 @@ func (ep *endpoint) handleItem(buf []byte) {
 		if old > ep.ttl {
 			continue
 		}
-		err := ep.client.Send(context.Background(), types.NetworkQueueItem{
-			Hash:   series.Hash,
-			Buffer: series.Bytes,
-		})
-		if err != nil {
-			level.Error(ep.log).Log("msg", "error sending to write client", "err", err)
+		sendErr := ep.client.SendSeries(context.Background(), series.Hash, series.Bytes)
+		if sendErr != nil {
+			level.Error(ep.log).Log("msg", "error sending to write client", "err", sendErr)
 		}
 
 	}
 	for _, md := range sg.Metadata {
-		ep.metaClient.Send(context.Background(), types.NetworkMetadataItem{
-			Buffer: md.Bytes,
-		})
+		sendErr := ep.client.SendMetadata(context.Background(), md.Bytes)
+		if sendErr != nil {
+			level.Error(ep.log).Log("msg", "error sending metadata to write client", "err", sendErr)
+		}
 	}
 }
 

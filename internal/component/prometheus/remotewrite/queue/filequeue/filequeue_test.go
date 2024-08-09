@@ -25,11 +25,10 @@ func TestFileQueue(t *testing.T) {
 	defer mbx.Stop()
 	q, err := NewQueue(dir, mbx, log)
 	require.NoError(t, err)
+	q.Start()
 	defer q.Stop()
-	err = q.Mailbox().Send(context.Background(), types.Data{
-		Meta: nil,
-		Data: []byte("test"),
-	})
+	err = q.Send(context.Background(), nil, []byte("test"))
+
 	require.NoError(t, err)
 
 	meta, buf, err := getHandle(t, mbx)
@@ -56,12 +55,10 @@ func TestMetaFileQueue(t *testing.T) {
 	mbx.Start()
 	defer mbx.Stop()
 	q, err := NewQueue(dir, mbx, log)
+	q.Start()
 	defer q.Stop()
 	require.NoError(t, err)
-	err = q.Mailbox().Send(context.Background(), types.Data{
-		Meta: map[string]string{"name": "bob"},
-		Data: []byte("test"),
-	})
+	err = q.Send(context.Background(), map[string]string{"name": "bob"}, []byte("test"))
 	require.NoError(t, err)
 
 	meta, buf, err := getHandle(t, mbx)
@@ -80,19 +77,14 @@ func TestCorruption(t *testing.T) {
 	mbx.Start()
 	defer mbx.Stop()
 	q, err := NewQueue(dir, mbx, log)
+	q.Start()
 	defer q.Stop()
 	require.NoError(t, err)
 
-	err = q.Mailbox().Send(context.Background(), types.Data{
-		Meta: map[string]string{"name": "bob"},
-		Data: []byte("first"),
-	})
+	err = q.Send(context.Background(), map[string]string{"name": "bob"}, []byte("first"))
 	require.NoError(t, err)
+	err = q.Send(context.Background(), map[string]string{"name": "bob"}, []byte("second"))
 
-	err = q.Mailbox().Send(context.Background(), types.Data{
-		Meta: map[string]string{"name": "bob"},
-		Data: []byte("second"),
-	})
 	require.NoError(t, err)
 
 	// Send is async so may need to wait a bit for it happen.
@@ -125,14 +117,14 @@ func TestFileDeleted(t *testing.T) {
 	mbx.Start()
 	defer mbx.Stop()
 	q, err := NewQueue(dir, mbx, log)
+	q.Start()
 	defer q.Stop()
 	require.NoError(t, err)
 
 	evenHandles := make([]string, 0)
 	for i := 0; i < 10; i++ {
-		err = q.Mailbox().Send(context.Background(), types.Data{
-			Data: []byte(strconv.Itoa(i)),
-		})
+		err = q.Send(context.Background(), map[string]string{"name": "bob"}, []byte(strconv.Itoa(i)))
+
 		require.NoError(t, err)
 		if i%2 == 0 {
 			evenHandles = append(evenHandles, filepath.Join(dir, strconv.Itoa(i+1)+".committed"))
@@ -146,7 +138,7 @@ func TestFileDeleted(t *testing.T) {
 	}, 2*time.Second, 100*time.Millisecond)
 
 	for _, h := range evenHandles {
-		os.Remove(h)
+		_ = os.Remove(h)
 	}
 	// Every even file was deleted and should have an error.
 	for i := 0; i < 10; i++ {
@@ -169,12 +161,11 @@ func TestOtherFiles(t *testing.T) {
 	mbx.Start()
 	defer mbx.Stop()
 	q, err := NewQueue(dir, mbx, log)
+	q.Start()
 	defer q.Stop()
 	require.NoError(t, err)
 
-	err = q.Mailbox().Send(context.Background(), types.Data{
-		Data: []byte("first"),
-	})
+	err = q.Send(context.Background(), nil, []byte("first"))
 	os.Create(filepath.Join(dir, "otherfile"))
 	_, buf, err := getHandle(t, mbx)
 	require.NoError(t, err)
@@ -189,16 +180,15 @@ func TestResuming(t *testing.T) {
 	mbx := actor.NewMailbox[types.DataHandle]()
 	mbx.Start()
 	q, err := NewQueue(dir, mbx, log)
+	q.Start()
 	require.NoError(t, err)
 
-	err = q.Mailbox().Send(context.Background(), types.Data{
-		Data: []byte("first"),
-	})
+	err = q.Send(context.Background(), nil, []byte("first"))
+
 	require.NoError(t, err)
 
-	err = q.Mailbox().Send(context.Background(), types.Data{
-		Data: []byte("second"),
-	})
+	err = q.Send(context.Background(), nil, []byte("second"))
+
 	require.NoError(t, err)
 	time.Sleep(1 * time.Second)
 	mbx.Stop()
@@ -208,11 +198,10 @@ func TestResuming(t *testing.T) {
 	mbx2.Start()
 	defer mbx2.Stop()
 	q2, err := NewQueue(dir, mbx2, log)
-	defer q2.Stop()
 	require.NoError(t, err)
-	err = q2.Mailbox().Send(context.Background(), types.Data{
-		Data: []byte("third"),
-	})
+	q2.Start()
+	defer q2.Stop()
+	err = q2.Send(context.Background(), nil, []byte("third"))
 
 	_, buf, err := getHandle(t, mbx2)
 	require.NoError(t, err)
@@ -228,14 +217,6 @@ func TestResuming(t *testing.T) {
 
 }
 
-/*
-	func addToQueue(t *testing.T, q types.FileStorage, meta map[string]string, data string) string {
-		handle, err := q.Add(meta, []byte(data))
-		require.NoError(t, err)
-		require.True(t, handle != "")
-		return handle
-	}
-*/
 func getHandle(t *testing.T, mbx actor.MailboxReceiver[types.DataHandle]) (map[string]string, []byte, error) {
 	timer := time.NewTicker(5 * time.Second)
 	select {

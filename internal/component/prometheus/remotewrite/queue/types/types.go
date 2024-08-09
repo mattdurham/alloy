@@ -12,8 +12,8 @@ import (
 
 type SeriesGroup struct {
 	_        struct{} `cbor:",toarray"`
-	Series   []*Raw   `cbor:"1,keyasint"`
-	Metadata []*Raw   `cbor:"2,keyasint"`
+	Series   []Raw    `cbor:"1,keyasint"`
+	Metadata []Raw    `cbor:"2,keyasint"`
 }
 
 func DeserializeToSeriesGroup(buf []byte) (*SeriesGroup, error) {
@@ -38,19 +38,6 @@ type Raw struct {
 
 type RawMetadata struct {
 	Raw
-}
-type QueueItem struct {
-	Buffer []byte
-	Meta   map[string]string
-}
-
-type NetworkQueueItem struct {
-	Hash   uint64
-	Buffer []byte
-}
-
-type NetworkMetadataItem struct {
-	Buffer []byte
 }
 
 func defaultArgs() Arguments {

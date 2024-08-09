@@ -54,7 +54,6 @@ type Queue struct {
 // Component.
 func (s *Queue) Run(ctx context.Context) error {
 	for _, ep := range s.args.Connections {
-
 		reg := prometheus.WrapRegistererWith(prometheus.Labels{"endpoint": ep.Name}, s.opts.Registerer)
 		stats := types.NewStats("alloy", "queue_series", reg)
 		stats.BackwardsCompatibility(reg)
@@ -71,16 +70,17 @@ func (s *Queue) Run(ctx context.Context) error {
 		}, uint64(ep.QueueCount), s.log, stats.UpdateNetwork, meta.UpdateNetwork)
 
 		end := &endpoint{
-			client:     client.Mailbox(),
-			metaClient: client.MetaMailbox(),
-			stat:       stats,
-			metaStats:  meta,
-			ctx:        ctx,
-			log:        s.opts.Logger,
-			ttl:        s.args.TTL,
+			client:    client,
+			stat:      stats,
+			metaStats: meta,
+			ctx:       ctx,
+			log:       s.opts.Logger,
+			ttl:       s.args.TTL,
 		}
 
-		fq, err := filequeue.NewQueue(filepath.Join(s.opts.DataPath, ep.Name, "wal"), end.mbx, s.opts.Logger)
+		fq, err := filequeue.NewQueue(filepath.Join(s.opts.DataPath, ep.Name, "wal"), func(ctx context.Context, dh types.DataHandle) {
+			_ = end.mbx.Send(ctx, dh)
+		}, s.opts.Logger)
 		if err != nil {
 			return err
 		}
@@ -88,15 +88,16 @@ func (s *Queue) Run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-
+		end.serializer = serial
 		s.endpoints[ep.Name] = end
+		end.Start()
 	}
 	defer func() {
 		s.mut.Lock()
 		defer s.mut.Unlock()
 
 		for _, ep := range s.endpoints {
-			ep.fq.Close()
+			ep.Stop()
 		}
 	}()
 

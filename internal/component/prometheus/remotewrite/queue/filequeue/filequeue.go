@@ -18,12 +18,17 @@ import (
 var _ actor.Worker = (*queue)(nil)
 
 type queue struct {
-	act       actor.Actor
+	self      actor.Actor
 	directory string
 	maxIndex  int
 	logger    log.Logger
 	inbox     actor.Mailbox[types.Data]
-	out       actor.MailboxSender[types.DataHandle]
+	out       func(ctx context.Context, dh types.DataHandle)
+}
+
+func (q *queue) Start() {
+	q.self = actor.Combine(actor.New(q), q.inbox).Build()
+	q.self.Start()
 }
 
 // Record wraps the input data and combines it with the metadata.
@@ -33,7 +38,7 @@ type Record struct {
 }
 
 // NewQueue returns a implementation of FileStorage.
-func NewQueue(directory string, out actor.MailboxSender[types.DataHandle], logger log.Logger) (types.FileStorage, error) {
+func NewQueue(directory string, out func(ctx context.Context, dh types.DataHandle), logger log.Logger) (types.FileStorage, error) {
 	err := os.MkdirAll(directory, 0777)
 	if err != nil {
 		return nil, err
@@ -62,12 +67,9 @@ func NewQueue(directory string, out actor.MailboxSender[types.DataHandle], logge
 		inbox:     actor.NewMailbox[types.Data](),
 	}
 
-	q.act = actor.Combine(actor.New(q), q.inbox).Build()
-	q.act.Start()
-
 	// Push the files that currently exist to the channel.
 	for _, id := range ids {
-		q.out.Send(context.Background(), types.DataHandle{
+		q.out(context.TODO(), types.DataHandle{
 			Name: filepath.Join(directory, fmt.Sprintf("%d.committed", id)),
 			Get:  get,
 		})
@@ -75,18 +77,20 @@ func NewQueue(directory string, out actor.MailboxSender[types.DataHandle], logge
 	return q, nil
 }
 
-func (q *queue) Mailbox() actor.MailboxSender[types.Data] {
-	return q.inbox
+func (q *queue) Send(ctx context.Context, meta map[string]string, data []byte) error {
+	return q.inbox.Send(ctx, types.Data{
+		Meta: meta,
+		Data: data,
+	})
 }
 
 func (q *queue) Stop() {
-	q.act.Stop()
-	q.inbox.Stop()
+	q.self.Stop()
 }
 
 func get(name string) (map[string]string, []byte, error) {
 	buf, err := readFile(name)
-	defer delete(name)
+	defer deleteFile(name)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -95,9 +99,7 @@ func get(name string) (map[string]string, []byte, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-
 	return r.Meta, r.Data, nil
-
 }
 
 func (q *queue) DoWork(ctx actor.Context) actor.WorkerStatus {
@@ -109,13 +111,12 @@ func (q *queue) DoWork(ctx actor.Context) actor.WorkerStatus {
 		if err != nil {
 			return actor.WorkerContinue
 		}
-		_ = q.out.Send(ctx, types.DataHandle{
+		q.out(ctx, types.DataHandle{
 			Name: name,
 			Get:  get,
 		})
 		return actor.WorkerContinue
 	}
-
 }
 
 // Add a committed file to the queue.
@@ -141,7 +142,7 @@ func (q *queue) add(meta map[string]string, data []byte) (string, error) {
 	return name, err
 }
 
-func delete(name string) {
+func deleteFile(name string) {
 	_ = os.Remove(name)
 }
 

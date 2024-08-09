@@ -20,8 +20,8 @@ type appender struct {
 	ttl       time.Duration
 	s         types.Serializer
 	ts        *prompb.TimeSeries
-	data      []*types.Raw
-	metadata  []*types.RawMetadata
+	data      []types.Raw
+	metadata  []types.RawMetadata
 	logger    log.Logger
 	batchSize int
 	stats     func(s types.FileQueueStats)
@@ -38,8 +38,8 @@ func NewAppender(ttl time.Duration, s types.Serializer, batchSize int, stats fun
 	app := &appender{
 		ttl:      ttl,
 		s:        s,
-		data:     make([]*types.Raw, 0),
-		metadata: make([]*types.RawMetadata, 0),
+		data:     make([]types.Raw, 0),
+		metadata: make([]types.RawMetadata, 0),
 		logger:   logger,
 		ts: &prompb.TimeSeries{
 			Labels:     make([]prompb.Label, 0),
@@ -76,7 +76,7 @@ func (a *appender) Append(ref storage.SeriesRef, l labels.Labels, t int64, v flo
 		return ref, err
 	}
 	hash := l.Hash()
-	a.data = append(a.data, &types.Raw{
+	a.data = append(a.data, types.Raw{
 		Hash:  hash,
 		TS:    t,
 		Bytes: data,
@@ -85,7 +85,7 @@ func (a *appender) Append(ref storage.SeriesRef, l labels.Labels, t int64, v flo
 	// Originally we fed it each entry but there was some mutex overhead in highly concurrent scraping
 	// Batching solved that problem, a batch size of 100 is enough.
 	if len(a.data) >= a.batchSize {
-		err = a.s.Mailbox().Send(context.Background(), a.data)
+		err = a.s.SendSeries(context.Background(), a.data)
 		if err != nil {
 			return ref, err
 		}
@@ -101,11 +101,11 @@ func (a *appender) Append(ref storage.SeriesRef, l labels.Labels, t int64, v flo
 
 // Commit is a no op since we always write.
 func (a *appender) Commit() (_ error) {
-	err := a.s.Mailbox().Send(context.Background(), a.data)
+	err := a.s.SendSeries(context.Background(), a.data)
 	if err != nil {
 		return err
 	}
-	return a.s.MetaMailbox().Send(context.Background(), a.metadata)
+	return a.s.SendMetadata(context.Background(), a.metadata)
 }
 
 // Rollback is a no op since we write all the data.
@@ -134,7 +134,7 @@ func (a *appender) AppendExemplar(ref storage.SeriesRef, l labels.Labels, e exem
 		return ref, err
 	}
 	hash := l.Hash()
-	a.data = append(a.data, &types.Raw{
+	a.data = append(a.data, types.Raw{
 		Hash:  hash,
 		TS:    ex.Timestamp,
 		Bytes: data,
@@ -166,7 +166,7 @@ func (a *appender) AppendHistogram(ref storage.SeriesRef, l labels.Labels, t int
 		return ref, err
 	}
 	hash := l.Hash()
-	a.data = append(a.data, &types.Raw{
+	a.data = append(a.data, types.Raw{
 		Hash:  hash,
 		TS:    t,
 		Bytes: data,
@@ -201,7 +201,7 @@ func (a *appender) UpdateMetadata(ref storage.SeriesRef, l labels.Labels, m meta
 	if err != nil {
 		return ref, err
 	}
-	a.data = append(a.data, &types.Raw{
+	a.data = append(a.data, types.Raw{
 		Hash:  l.Hash(),
 		TS:    0,
 		Bytes: data,

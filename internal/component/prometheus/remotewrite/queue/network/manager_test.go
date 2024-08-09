@@ -216,10 +216,7 @@ func send(t *testing.T, wr types.NetworkClient, ctx context.Context) {
 	tsBuf, err := ts.Marshal()
 	require.NoError(t, err)
 	// The actual hash is only used for queueing into different buckets.
-	err = wr.Mailbox().Send(ctx, types.NetworkQueueItem{
-		Hash:   rand.Uint64(),
-		Buffer: tsBuf,
-	})
+	err = wr.SendSeries(ctx, rand.Uint64(), tsBuf)
 	require.NoError(t, err)
 }
 

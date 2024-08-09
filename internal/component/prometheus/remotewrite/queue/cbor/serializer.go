@@ -1,6 +1,7 @@
 package cbor
 
 import (
+	"context"
 	"time"
 
 	snappy "github.com/eapache/go-xerial-snappy"
@@ -12,8 +13,8 @@ import (
 )
 
 type Serializer struct {
-	inbox         actor.Mailbox[[]*types.Raw]
-	metaInbox     actor.Mailbox[[]*types.RawMetadata]
+	inbox         actor.Mailbox[[]types.Raw]
+	metaInbox     actor.Mailbox[[]types.RawMetadata]
 	maxSizeBytes  int
 	flushDuration time.Duration
 	queue         types.FileStorage
@@ -21,32 +22,48 @@ type Serializer struct {
 	lastFlush     time.Time
 	bytesInGroup  uint32
 	logger        log.Logger
-	act           actor.Actor
+	self          actor.Actor
 }
 
-func NewSerializer(maxSizeBytes int, flushDuration time.Duration, q types.FileStorage, l log.Logger) (*Serializer, error) {
+func NewSerializer(maxSizeBytes int, flushDuration time.Duration, q types.FileStorage, l log.Logger) (types.Serializer, error) {
 	s := &Serializer{
 		maxSizeBytes:  maxSizeBytes,
 		flushDuration: flushDuration,
 		queue:         q,
 		group: &types.SeriesGroup{
-			Series:   make([]*types.Raw, 0),
-			Metadata: make([]*types.Raw, 0),
+			Series:   make([]types.Raw, 0),
+			Metadata: make([]types.Raw, 0),
 		},
 		logger:    l,
 		inbox:     actor.NewMailbox[[]*types.Raw](),
 		metaInbox: actor.NewMailbox[[]*types.RawMetadata](),
 	}
-	s.act = actor.Combine(actor.New(s), s.inbox, s.metaInbox).Build()
-	s.act.Start()
+
 	return s, nil
 }
 
-func (s *Serializer) Mailbox() actor.MailboxSender[[]*types.Raw] {
+func (s *Serializer) Start() {
+	s.self = actor.Combine(actor.New(s), s.inbox, s.metaInbox).Build()
+	s.self.Start()
+}
+
+func (s *Serializer) Stop() {
+	s.self.Stop()
+}
+
+func (s *Serializer) SendSeries(ctx context.Context, data []types.Raw) error {
+	return s.inbox.Send(ctx, data)
+}
+
+func (s *Serializer) SendMetadata(ctx context.Context, data []types.RawMetadata) error {
+	return s.metaInbox.Send(ctx, data)
+}
+
+func (s *Serializer) Mailbox() actor.MailboxSender[[]types.Raw] {
 	return s.inbox
 }
 
-func (s *Serializer) MetaMailbox() actor.MailboxSender[[]*types.RawMetadata] {
+func (s *Serializer) MetaMailbox() actor.MailboxSender[[]types.RawMetadata] {
 	return s.metaInbox
 }
 
@@ -70,13 +87,13 @@ func (s *Serializer) DoWork(ctx actor.Context) actor.WorkerStatus {
 	}
 }
 
-func (s *Serializer) AppendMetadata(ctx actor.Context, data []*types.RawMetadata) error {
+func (s *Serializer) AppendMetadata(ctx actor.Context, data []types.RawMetadata) error {
 	if len(data) == 0 {
 		return nil
 	}
 
 	for _, d := range data {
-		s.group.Metadata = append(s.group.Series, &d.Raw)
+		s.group.Metadata = append(s.group.Series, d.Raw)
 		s.bytesInGroup = s.bytesInGroup + uint32(len(d.Bytes)) + 4
 	}
 	// If we would go over the max size then send, or if we have hit the flush duration then send.
@@ -89,7 +106,7 @@ func (s *Serializer) AppendMetadata(ctx actor.Context, data []*types.RawMetadata
 	return nil
 }
 
-func (s *Serializer) Append(ctx actor.Context, data []*types.Raw) error {
+func (s *Serializer) Append(ctx actor.Context, data []types.Raw) error {
 	if len(data) == 0 {
 		return nil
 	}
@@ -119,20 +136,15 @@ func (s *Serializer) store(ctx actor.Context) error {
 
 	buffer, err := cbor.Marshal(s.group)
 	// We can reset the group now.
-	s.group = &types.SeriesGroup{
-		Series:   make([]*types.Raw, 0),
-		Metadata: make([]*types.Raw, 0),
-	}
+	s.group.Series = s.group.Series[:0]
+	s.group.Metadata = s.group.Metadata[:0]
 
 	if err != nil {
 		// Something went wrong with serializing the whole group so lets drop it.
 		return err
 	}
 	out := snappy.Encode(buffer)
-	err = s.queue.Mailbox().Send(ctx, types.Data{
-		Meta: version,
-		Data: out,
-	})
+	err = s.queue.Send(ctx, version, out)
 	s.bytesInGroup = 0
 	return err
 }

@@ -1,13 +1,12 @@
 package types
 
 import (
-	"github.com/vladopajic/go-actor/actor"
+	"context"
 )
 
 type NetworkClient interface {
 	Start()
 	Stop()
-	Mailbox() actor.MailboxSender[NetworkQueueItem]
-
-	MetaMailbox() actor.MailboxSender[NetworkMetadataItem]
+	SendSeries(ctx context.Context, hash uint64, data []byte) error
+	SendMetadata(ctx context.Context, data []byte) error
 }

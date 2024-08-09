@@ -102,12 +102,17 @@ func (s *manager) Start() {
 	s.combinedActor.Start()
 }
 
-func (s *manager) Mailbox() actor.MailboxSender[types.NetworkQueueItem] {
-	return s.inbox
+func (s *manager) SendSeries(ctx context.Context, hash uint64, data []byte) error {
+	return s.inbox.Send(ctx, types.NetworkQueueItem{
+		Hash:   hash,
+		Buffer: data,
+	})
 }
 
-func (s *manager) MetaMailbox() actor.MailboxSender[types.NetworkMetadataItem] {
-	return s.metaInbox
+func (s *manager) SendMetadata(ctx context.Context, data []byte) error {
+	return s.metaInbox.Send(ctx, types.NetworkMetadataItem{
+		Buffer: data,
+	})
 }
 
 func (s *manager) DoWork(ctx actor.Context) actor.WorkerStatus {
