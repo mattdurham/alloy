@@ -3,7 +3,6 @@ package network
 import (
 	"context"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/go-kit/log"
@@ -14,15 +13,13 @@ import (
 )
 
 type manager struct {
-	mut             sync.Mutex
 	connectionCount uint64
-	loops           []actor.Actor
-	loopsMbx        []actor.Mailbox[[]byte]
-	metadata        actor.Actor
-	metaMbx         actor.Mailbox[[]byte]
+	loops           []*loop
+	metadata        *loop
 	logger          log.Logger
 	inbox           actor.Mailbox[types.NetworkQueueItem]
 	metaInbox       actor.Mailbox[types.NetworkMetadataItem]
+	combinedActor   actor.Actor
 }
 
 var _ types.NetworkClient = (*manager)(nil)
@@ -45,17 +42,19 @@ type ConnectionConfig struct {
 func New(ctx context.Context, cc ConnectionConfig, connectionCount uint64, logger log.Logger, seriesStats, metadataStats func(types.NetworkStats)) (types.NetworkClient, error) {
 	s := &manager{
 		connectionCount: connectionCount,
-		loops:           make([]actor.Actor, 0),
-		loopsMbx:        make([]actor.Mailbox[[]byte], 0),
+		loops:           make([]*loop, 0),
 		logger:          logger,
-		inbox:           actor.NewMailbox[types.NetworkQueueItem](),
+		inbox:           actor.NewMailbox[types.NetworkQueueItem](actor.OptCapacity(1)),
+		metaInbox:       actor.NewMailbox[types.NetworkMetadataItem](actor.OptCapacity(1)),
 	}
 
 	// start kicks off a number of concurrent connections.
 	var i uint64
 	for ; i < s.connectionCount; i++ {
-		mbx := actor.NewMailbox[[]byte](actor.OptCapacity(2 * cc.BatchCount))
 		l := &loop{
+			seriesMbx:      actor.NewMailbox[[]byte](actor.OptCapacity(2 * cc.BatchCount)),
+			configMbx:      actor.NewMailbox[ConnectionConfig](),
+			metaSeriesMbx:  actor.NewMailbox[[]byte](),
 			batchCount:     cc.BatchCount,
 			flushTimer:     cc.FlushDuration,
 			client:         &http.Client{},
@@ -66,29 +65,41 @@ func New(ctx context.Context, cc ConnectionConfig, connectionCount uint64, logge
 			seriesBuf:      make([]prompb.TimeSeries, 0),
 			statsFunc:      seriesStats,
 			externalLabels: cc.ExternalLabels,
-			seriesMbx:      mbx,
 		}
-		mbx.Start()
-		s.loopsMbx = append(s.loopsMbx, mbx)
-		lActor := actor.New(l)
-		s.loops = append(s.loops, lActor)
-		lActor.Start()
+		l.self = actor.New(l)
+		s.loops = append(s.loops, l)
 	}
 
-	s.metadata = actor.New(&loop{
-		batchCount: cc.BatchCount,
-		flushTimer: cc.FlushDuration,
-		client:     &http.Client{},
-		cfg:        cc,
-		pbuf:       proto.NewBuffer(nil),
-		buf:        make([]byte, 0),
-		log:        logger,
-		seriesBuf:  make([]prompb.TimeSeries, 0),
-		statsFunc:  metadataStats,
-		seriesMbx:  actor.NewMailbox[[]byte](),
-	})
-	s.inbox.Start()
+	s.metadata = &loop{
+		seriesMbx:     actor.NewMailbox[[]byte](actor.OptCapacity(2 * cc.BatchCount)),
+		configMbx:     actor.NewMailbox[ConnectionConfig](),
+		metaSeriesMbx: actor.NewMailbox[[]byte](),
+		batchCount:    cc.BatchCount,
+		flushTimer:    cc.FlushDuration,
+		client:        &http.Client{},
+		cfg:           cc,
+		pbuf:          proto.NewBuffer(nil),
+		buf:           make([]byte, 0),
+		log:           logger,
+		seriesBuf:     make([]prompb.TimeSeries, 0),
+		statsFunc:     metadataStats,
+	}
+	s.metadata.self = actor.New(s.metadata)
 	return s, nil
+}
+
+func (s *manager) Start() {
+	actors := make([]actor.Actor, 0)
+	for _, l := range s.loops {
+		actors = append(actors, l.actors()...)
+	}
+	actors = append(actors, s.metadata.actors()...)
+	actors = append(actors, s.inbox)
+	actors = append(actors, s.metaInbox)
+	actors = append(actors, actor.New(s))
+
+	s.combinedActor = actor.Combine(actors...).Build()
+	s.combinedActor.Start()
 }
 
 func (s *manager) Mailbox() actor.MailboxSender[types.NetworkQueueItem] {
@@ -121,25 +132,21 @@ func (s *manager) DoWork(ctx actor.Context) actor.WorkerStatus {
 
 func (s *manager) Stop() {
 	for _, l := range s.loops {
-		l.Stop()
+		l.stopCalled.Store(true)
 	}
-	for _, l := range s.loopsMbx {
-		l.Stop()
-	}
+	s.metadata.stopCalled.Store(true)
+	s.combinedActor.Stop()
 
-	s.metadata.Stop()
-	s.metaMbx.Stop()
-	s.inbox.Stop()
 }
 
 // Queue adds anything thats not metadata to the queue.
 func (s *manager) Queue(ctx context.Context, hash uint64, d []byte) {
 	// Based on a hash which is the label hash add to the queue.
 	queueNum := hash % s.connectionCount
-	s.loopsMbx[queueNum].Send(ctx, d)
+	s.loops[queueNum].seriesMbx.Send(ctx, d)
 }
 
 // QueueMetadata adds metadata to the queue.
 func (s *manager) QueueMetadata(ctx context.Context, d []byte) {
-	s.metaMbx.Send(ctx, d)
+	s.metadata.metaSeriesMbx.Send(ctx, d)
 }

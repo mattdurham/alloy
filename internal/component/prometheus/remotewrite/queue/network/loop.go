@@ -25,9 +25,9 @@ var _ actor.Worker = (*loop)(nil)
 // loop handles the low level sending of data. It conceptually a queue.
 // TODO @mattdurham think about if we need to split loop into metadata loop
 type loop struct {
-	configMbx      actor.MailboxReceiver[ConnectionConfig]
-	seriesMbx      actor.MailboxReceiver[[]byte]
-	metaSeriesMbx  actor.MailboxReceiver[[]byte]
+	configMbx      actor.Mailbox[ConnectionConfig]
+	seriesMbx      actor.Mailbox[[]byte]
+	metaSeriesMbx  actor.Mailbox[[]byte]
 	client         *http.Client
 	batchCount     int
 	flushTimer     time.Duration
@@ -42,12 +42,23 @@ type loop struct {
 	stopCalled     atomic.Bool
 	externalLabels map[string]string
 	series         [][]byte
+	self           actor.Actor
+}
+
+func (l *loop) actors() []actor.Actor {
+	return []actor.Actor{
+		l.self,
+		l.metaSeriesMbx,
+		l.seriesMbx,
+		l.configMbx,
+	}
 }
 
 func (l *loop) DoWork(ctx actor.Context) actor.WorkerStatus {
 	// This first select is to prioritize configuration changes.
 	select {
 	case <-ctx.Done():
+		l.stopCalled.Store(true)
 		return actor.WorkerEnd
 	case cc := <-l.configMbx.ReceiveC():
 		l.cfg = cc
@@ -58,6 +69,7 @@ func (l *loop) DoWork(ctx actor.Context) actor.WorkerStatus {
 	timer := time.NewTimer(1 * time.Second)
 	select {
 	case <-ctx.Done():
+		l.stopCalled.Store(true)
 		return actor.WorkerEnd
 	case cc := <-l.configMbx.ReceiveC():
 		l.cfg = cc

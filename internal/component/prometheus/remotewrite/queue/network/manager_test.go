@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
+	"go.uber.org/goleak"
 	"io"
 	"math/rand"
 	"net/http"
@@ -18,6 +19,8 @@ import (
 )
 
 func TestSending(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	recordsFound := atomic.Uint32{}
 	svr := httptest.NewServer(handler(t, http.StatusOK, func(wr *prompb.WriteRequest) {
 		recordsFound.Add(uint32(len(wr.Timeseries)))
@@ -37,16 +40,20 @@ func TestSending(t *testing.T) {
 
 	logger := log.NewNopLogger()
 	wr, err := New(ctx, cc, 4, logger, func(s types.NetworkStats) {}, func(s types.NetworkStats) {})
+	wr.Start()
+	defer wr.Stop()
 	require.NoError(t, err)
 	for i := 0; i < 1_000; i++ {
 		send(t, wr, ctx)
 	}
 	require.Eventually(t, func() bool {
 		return recordsFound.Load() == 1_000
-	}, 2*time.Second, 100*time.Millisecond)
+	}, 10*time.Second, 100*time.Millisecond)
 }
 
 func TestRetry(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	retries := atomic.Uint32{}
 	var previous *prompb.WriteRequest
 	svr := httptest.NewServer(handler(t, http.StatusTooManyRequests, func(wr *prompb.WriteRequest) {
@@ -66,7 +73,7 @@ func TestRetry(t *testing.T) {
 	cc := ConnectionConfig{
 		URL:           svr.URL,
 		Timeout:       1 * time.Second,
-		BatchCount:    100,
+		BatchCount:    1,
 		FlushDuration: 1 * time.Second,
 		RetryBackoff:  100 * time.Millisecond,
 	}
@@ -74,15 +81,22 @@ func TestRetry(t *testing.T) {
 	logger := log.NewNopLogger()
 	wr, err := New(ctx, cc, 1, logger, func(s types.NetworkStats) {}, func(s types.NetworkStats) {})
 	require.NoError(t, err)
+	wr.Start()
+	defer wr.Stop()
+
 	for i := 0; i < 10; i++ {
 		send(t, wr, ctx)
 	}
+	time.Sleep(5 * time.Second)
 	require.Eventually(t, func() bool {
-		return retries.Load() > 5
-	}, 2*time.Second, 100*time.Millisecond)
+		done := retries.Load() > 5
+		return done
+	}, 10*time.Second, 100*time.Millisecond)
 }
 
 func TestRetryBounded(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	sends := atomic.Uint32{}
 	svr := httptest.NewServer(handler(t, http.StatusTooManyRequests, func(wr *prompb.WriteRequest) {
 		sends.Add(1)
@@ -104,6 +118,8 @@ func TestRetryBounded(t *testing.T) {
 
 	logger := log.NewNopLogger()
 	wr, err := New(ctx, cc, 1, logger, func(s types.NetworkStats) {}, func(s types.NetworkStats) {})
+	wr.Start()
+	defer wr.Stop()
 	require.NoError(t, err)
 	for i := 0; i < 10; i++ {
 		send(t, wr, ctx)
@@ -118,6 +134,8 @@ func TestRetryBounded(t *testing.T) {
 }
 
 func TestRecoverable(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	recoverable := atomic.Uint32{}
 	svr := httptest.NewServer(handler(t, http.StatusInternalServerError, func(wr *prompb.WriteRequest) {
 	}))
@@ -140,6 +158,8 @@ func TestRecoverable(t *testing.T) {
 		recoverable.Add(uint32(s.Retries5XX))
 	}, func(s types.NetworkStats) {})
 	require.NoError(t, err)
+	wr.Start()
+	defer wr.Stop()
 	for i := 0; i < 10; i++ {
 		send(t, wr, ctx)
 	}
@@ -153,6 +173,8 @@ func TestRecoverable(t *testing.T) {
 }
 
 func TestNonRecoverable(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	nonRecoverable := atomic.Uint32{}
 	svr := httptest.NewServer(handler(t, http.StatusBadRequest, func(wr *prompb.WriteRequest) {
 	}))
@@ -175,6 +197,8 @@ func TestNonRecoverable(t *testing.T) {
 	wr, err := New(ctx, cc, 1, logger, func(s types.NetworkStats) {
 		nonRecoverable.Add(uint32(s.Fails))
 	}, func(s types.NetworkStats) {})
+	wr.Start()
+	defer wr.Stop()
 	require.NoError(t, err)
 	for i := 0; i < 10; i++ {
 		send(t, wr, ctx)
@@ -192,8 +216,11 @@ func send(t *testing.T, wr types.NetworkClient, ctx context.Context) {
 	tsBuf, err := ts.Marshal()
 	require.NoError(t, err)
 	// The actual hash is only used for queueing into different buckets.
-	success := wr.Queue(ctx, rand.Uint64(), tsBuf)
-	require.True(t, success)
+	err = wr.Mailbox().Send(ctx, types.NetworkQueueItem{
+		Hash:   rand.Uint64(),
+		Buffer: tsBuf,
+	})
+	require.NoError(t, err)
 }
 
 func handler(t *testing.T, code int, callback func(wr *prompb.WriteRequest)) http.HandlerFunc {

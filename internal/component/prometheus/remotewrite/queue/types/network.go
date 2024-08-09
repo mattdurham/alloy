@@ -5,6 +5,8 @@ import (
 )
 
 type NetworkClient interface {
+	Start()
+	Stop()
 	Mailbox() actor.MailboxSender[NetworkQueueItem]
 
 	MetaMailbox() actor.MailboxSender[NetworkMetadataItem]
