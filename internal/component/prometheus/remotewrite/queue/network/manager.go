@@ -19,7 +19,8 @@ type manager struct {
 	logger          log.Logger
 	inbox           actor.Mailbox[types.NetworkQueueItem]
 	metaInbox       actor.Mailbox[types.NetworkMetadataItem]
-	combinedActor   actor.Actor
+	self            actor.Actor
+	cfg             ConnectionConfig
 }
 
 var _ types.NetworkClient = (*manager)(nil)
@@ -37,11 +38,12 @@ type ConnectionConfig struct {
 	BatchCount              int
 	FlushDuration           time.Duration
 	ExternalLabels          map[string]string
+	Connections             uint64
 }
 
-func New(ctx context.Context, cc ConnectionConfig, connectionCount uint64, logger log.Logger, seriesStats, metadataStats func(types.NetworkStats)) (types.NetworkClient, error) {
+func New(ctx context.Context, cc ConnectionConfig, logger log.Logger, seriesStats, metadataStats func(types.NetworkStats)) (types.NetworkClient, error) {
 	s := &manager{
-		connectionCount: connectionCount,
+		connectionCount: cc.Connections,
 		loops:           make([]*loop, 0),
 		logger:          logger,
 		inbox:           actor.NewMailbox[types.NetworkQueueItem](actor.OptCapacity(1)),
@@ -91,15 +93,12 @@ func New(ctx context.Context, cc ConnectionConfig, connectionCount uint64, logge
 func (s *manager) Start() {
 	actors := make([]actor.Actor, 0)
 	for _, l := range s.loops {
-		actors = append(actors, l.actors()...)
+		l.Start()
 	}
 	actors = append(actors, s.metadata.actors()...)
 	actors = append(actors, s.inbox)
 	actors = append(actors, s.metaInbox)
 	actors = append(actors, actor.New(s))
-
-	s.combinedActor = actor.Combine(actors...).Build()
-	s.combinedActor.Start()
 }
 
 func (s *manager) SendSeries(ctx context.Context, hash uint64, data []byte) error {
@@ -135,13 +134,50 @@ func (s *manager) DoWork(ctx actor.Context) actor.WorkerStatus {
 	}
 }
 
+func (s *manager) updateConfig(cc ConnectionConfig) {
+	// Did the batchcount change, if so we need to recreate all the items.
+
+	if cc.BatchCount != s.cfg.BatchCount {
+		// Rebuild all the connections.
+	}
+
+	// 1. Did the configuration count change?
+	if cc.Connections != s.cfg.Connections {
+		// What to do if its less?
+
+		// If its more?
+		if cc.Connections > s.cfg.Connections {
+			// Add more connections.
+			for i := s.cfg.Connections; i < cc.Connections; i++ {
+				l := &loop{
+					seriesMbx:      actor.NewMailbox[[]byte](actor.OptCapacity(2 * cc.BatchCount)),
+					configMbx:      actor.NewMailbox[ConnectionConfig](),
+					metaSeriesMbx:  actor.NewMailbox[[]byte](),
+					batchCount:     cc.BatchCount,
+					flushTimer:     cc.FlushDuration,
+					client:         &http.Client{},
+					cfg:            cc,
+					pbuf:           proto.NewBuffer(nil),
+					buf:            make([]byte, 0),
+					log:            s.logger,
+					seriesBuf:      make([]prompb.TimeSeries, 0),
+					statsFunc:      s.metadata.statsFunc,
+					externalLabels: cc.ExternalLabels,
+				}
+				l.Start()
+				s.loops = append(s.loops, l)
+			}
+		}
+	}
+}
+
 func (s *manager) Stop() {
 	for _, l := range s.loops {
+		l.Stop()
 		l.stopCalled.Store(true)
 	}
 	s.metadata.stopCalled.Store(true)
-	s.combinedActor.Stop()
-
+	s.self.Stop()
 }
 
 // Queue adds anything thats not metadata to the queue.

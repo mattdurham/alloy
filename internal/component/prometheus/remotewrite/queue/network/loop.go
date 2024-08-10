@@ -45,9 +45,17 @@ type loop struct {
 	self           actor.Actor
 }
 
+func (l *loop) Start() {
+	l.self = actor.Combine(l.actors()...).Build()
+	l.self.Start()
+}
+
+func (l *loop) Stop() {
+	l.self.Stop()
+}
+
 func (l *loop) actors() []actor.Actor {
 	return []actor.Actor{
-		l.self,
 		l.metaSeriesMbx,
 		l.seriesMbx,
 		l.configMbx,
