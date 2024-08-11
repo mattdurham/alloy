@@ -53,39 +53,12 @@ func New(ctx context.Context, cc ConnectionConfig, logger log.Logger, seriesStat
 	// start kicks off a number of concurrent connections.
 	var i uint64
 	for ; i < s.connectionCount; i++ {
-		l := &loop{
-			seriesMbx:      actor.NewMailbox[[]byte](actor.OptCapacity(2 * cc.BatchCount)),
-			configMbx:      actor.NewMailbox[ConnectionConfig](),
-			metaSeriesMbx:  actor.NewMailbox[[]byte](),
-			batchCount:     cc.BatchCount,
-			flushTimer:     cc.FlushDuration,
-			client:         &http.Client{},
-			cfg:            cc,
-			pbuf:           proto.NewBuffer(nil),
-			buf:            make([]byte, 0),
-			log:            logger,
-			seriesBuf:      make([]prompb.TimeSeries, 0),
-			statsFunc:      seriesStats,
-			externalLabels: cc.ExternalLabels,
-		}
+		l := newLoop(cc, logger, seriesStats)
 		l.self = actor.New(l)
 		s.loops = append(s.loops, l)
 	}
 
-	s.metadata = &loop{
-		seriesMbx:     actor.NewMailbox[[]byte](actor.OptCapacity(2 * cc.BatchCount)),
-		configMbx:     actor.NewMailbox[ConnectionConfig](),
-		metaSeriesMbx: actor.NewMailbox[[]byte](),
-		batchCount:    cc.BatchCount,
-		flushTimer:    cc.FlushDuration,
-		client:        &http.Client{},
-		cfg:           cc,
-		pbuf:          proto.NewBuffer(nil),
-		buf:           make([]byte, 0),
-		log:           logger,
-		seriesBuf:     make([]prompb.TimeSeries, 0),
-		statsFunc:     metadataStats,
-	}
+	s.metadata = newLoop(cc, logger, metadataStats)
 	s.metadata.self = actor.New(s.metadata)
 	return s, nil
 }

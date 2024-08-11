@@ -45,6 +45,24 @@ type loop struct {
 	self           actor.Actor
 }
 
+func newLoop(cc ConnectionConfig, log log.Logger, series func(s types.NetworkStats)) *loop {
+	return &loop{
+		seriesMbx:      actor.NewMailbox[[]byte](actor.OptCapacity(2 * cc.BatchCount)),
+		configMbx:      actor.NewMailbox[ConnectionConfig](),
+		metaSeriesMbx:  actor.NewMailbox[[]byte](),
+		batchCount:     cc.BatchCount,
+		flushTimer:     cc.FlushDuration,
+		client:         &http.Client{},
+		cfg:            cc,
+		pbuf:           proto.NewBuffer(nil),
+		buf:            make([]byte, 0),
+		log:            log,
+		seriesBuf:      make([]prompb.TimeSeries, 0),
+		statsFunc:      series,
+		externalLabels: cc.ExternalLabels,
+	}
+}
+
 func (l *loop) Start() {
 	l.self = actor.Combine(l.actors()...).Build()
 	l.self.Start()
