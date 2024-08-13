@@ -12,20 +12,32 @@ import (
 )
 
 type TimeSeries struct {
-	Labels []Labels `cbor:"1,keyasint"`
-	TS     int64    `cbor:"2,keyasint"`
-	Value  float64  `cbor:"3,keyasint"`
+	Labels []Label `cbor:"1,keyasint"`
+	TS     int64   `cbor:"2,keyasint"`
+	Value  float64 `cbor:"3,keyasint"`
+	Hash   uint64  `cbor:"3,keyasint"`
 }
 
-type Labels struct {
+type Label struct {
 	Name  string `cbor:"1,keyasint"`
 	Value string `cbor:"2,keyasint"`
+}
+
+func (ts TimeSeries) ByteLength() int {
+	length := 0
+	// Hash, value , TS
+	length += 8 + 8 + 8
+	for _, l := range ts.Labels {
+		length += len(l.Name)
+		length += len(l.Value)
+	}
+	return length
 }
 
 type SeriesGroup struct {
 	_        struct{}     `cbor:",toarray"`
 	Series   []TimeSeries `cbor:"1,keyasint"`
-	Metadata []TimeSeries `cbor:"2,keyasint"`
+	Metadata []MetaSeries `cbor:"2,keyasint"`
 }
 
 func DeserializeToSeriesGroup(buf []byte) (*SeriesGroup, error) {

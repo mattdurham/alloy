@@ -15,7 +15,6 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
-	"github.com/ortuman/nuke"
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/vladopajic/go-actor/actor"
 	"go.uber.org/atomic"
@@ -27,8 +26,8 @@ var _ actor.Worker = (*loop)(nil)
 // TODO @mattdurham think about if we need to split loop into metadata loop
 type loop struct {
 	configMbx      actor.Mailbox[ConnectionConfig]
-	seriesMbx      actor.Mailbox[[]byte]
-	metaSeriesMbx  actor.Mailbox[[]byte]
+	seriesMbx      actor.Mailbox[types.TimeSeries]
+	metaSeriesMbx  actor.Mailbox[types.MetaSeries]
 	client         *http.Client
 	batchCount     int
 	flushTimer     time.Duration
@@ -42,15 +41,16 @@ type loop struct {
 	stopCh         chan struct{}
 	stopCalled     atomic.Bool
 	externalLabels map[string]string
-	series         [][]byte
+	series         []types.TimeSeries
 	self           actor.Actor
+	ticker         *time.Ticker
 }
 
 func newLoop(cc ConnectionConfig, log log.Logger, series func(s types.NetworkStats)) *loop {
 	return &loop{
-		seriesMbx:      actor.NewMailbox[[]byte](actor.OptCapacity(2 * cc.BatchCount)),
+		seriesMbx:      actor.NewMailbox[types.TimeSeries](actor.OptCapacity(2 * cc.BatchCount)),
 		configMbx:      actor.NewMailbox[ConnectionConfig](),
-		metaSeriesMbx:  actor.NewMailbox[[]byte](),
+		metaSeriesMbx:  actor.NewMailbox[types.MetaSeries](),
 		batchCount:     cc.BatchCount,
 		flushTimer:     cc.FlushDuration,
 		client:         &http.Client{},
@@ -61,6 +61,7 @@ func newLoop(cc ConnectionConfig, log log.Logger, series func(s types.NetworkSta
 		seriesBuf:      make([]prompb.TimeSeries, 0),
 		statsFunc:      series,
 		externalLabels: cc.ExternalLabels,
+		ticker:         time.NewTicker(1 * time.Second),
 	}
 }
 
@@ -95,7 +96,6 @@ func (l *loop) DoWork(ctx actor.Context) actor.WorkerStatus {
 	default:
 	}
 	// Timer is to check the flush.
-	timer := time.NewTimer(1 * time.Second)
 	select {
 	case <-ctx.Done():
 		l.stopCalled.Store(true)
@@ -103,7 +103,7 @@ func (l *loop) DoWork(ctx actor.Context) actor.WorkerStatus {
 	case cc := <-l.configMbx.ReceiveC():
 		l.cfg = cc
 		return actor.WorkerContinue
-	case <-timer.C:
+	case <-l.ticker.C:
 		if len(l.series) == 0 {
 			return actor.WorkerContinue
 		}
@@ -119,18 +119,18 @@ func (l *loop) DoWork(ctx actor.Context) actor.WorkerStatus {
 			l.series = l.series[:0]
 		}
 		return actor.WorkerContinue
-	case buf := <-l.metaSeriesMbx.ReceiveC():
-		l.series = append(l.series, buf)
+	case <-l.metaSeriesMbx.ReceiveC():
+		/*l.series = append(l.series, buf)
 		if len(l.series) >= l.batchCount {
 			l.trySend(l.series)
 			l.series = l.series[:0]
-		}
+		}*/
 		return actor.WorkerContinue
 	}
 }
 
 // trySend is the core functionality for sending data to a endpoint. It will attempt retries as defined in MaxRetryBackoffAttempts.
-func (l *loop) trySend(series [][]byte) {
+func (l *loop) trySend(series []types.TimeSeries) {
 	attempts := 0
 attempt:
 	level.Debug(l.log).Log("msg", "sending data", "attempts", attempts, "len", len(series))
@@ -175,19 +175,27 @@ func (l *loop) finishSending() {
 	l.lastSend = time.Now()
 }
 
-func (l *loop) send(series [][]byte, retryCount int) sendResult {
+func (l *loop) send(series []types.TimeSeries, retryCount int) sendResult {
 	result := sendResult{}
 	l.pbuf.Reset()
-	l.seriesBuf = l.seriesBuf[:0]
-	arena := nuke.NewMonotonicArena(256*1024, 80)
-	defer arena.Reset(true)
-	for _, tsBuf := range series {
-		ts := nuke.New[prompb.TimeSeries](arena)
-		err := ts.Unmarshal(tsBuf)
-		if err != nil {
-			continue
+	if cap(l.seriesBuf) < len(l.series) {
+		l.seriesBuf = make([]prompb.TimeSeries, len(l.series), len(l.series))
+	}
+	l.seriesBuf = l.seriesBuf[:len(series)]
+	for i, tsBuf := range series {
+		if cap(l.seriesBuf[i].Labels) < len(tsBuf.Labels) {
+			l.seriesBuf[i].Labels = make([]prompb.Label, len(tsBuf.Labels), len(tsBuf.Labels))
 		}
-		l.seriesBuf = append(l.seriesBuf, *ts)
+		l.seriesBuf[i].Labels = l.seriesBuf[i].Labels[:len(tsBuf.Labels)]
+		//l.seriesBuf[i].Histograms = l.seriesBuf[i].Histograms[:len(tsBuf.Labels)]
+		if cap(l.seriesBuf[i].Samples) < 1 {
+			l.seriesBuf[i].Samples = make([]prompb.Sample, 1)
+		}
+		l.seriesBuf[i].Samples = l.seriesBuf[i].Samples[:1]
+		for k, v := range tsBuf.Labels {
+			l.seriesBuf[i].Labels[k].Name = v.Name
+			l.seriesBuf[i].Labels[k].Value = v.Value
+		}
 	}
 	req := &prompb.WriteRequest{
 		Timeseries: l.seriesBuf,

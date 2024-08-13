@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"github.com/fxamacker/cbor/v2"
 
 	"github.com/go-kit/log"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
@@ -83,13 +84,15 @@ func (s *manager) DoWork(ctx actor.Context) actor.WorkerStatus {
 		if !ok {
 			return actor.WorkerEnd
 		}
-		s.Queue(ctx, item.Hash, item.Buffer)
+		ts := &types.TimeSeries{}
+		cbor.Unmarshal(item.Buffer, ts)
+		s.Queue(ctx, item.Hash, *ts)
 		return actor.WorkerContinue
-	case item, ok := <-s.metaInbox.ReceiveC():
+	case _, ok := <-s.metaInbox.ReceiveC():
 		if !ok {
 			return actor.WorkerEnd
 		}
-		s.QueueMetadata(ctx, item.Buffer)
+		//s.QueueMetadata(ctx, item.Buffer)
 		return actor.WorkerContinue
 	}
 }
@@ -129,13 +132,13 @@ func (s *manager) Stop() {
 }
 
 // Queue adds anything thats not metadata to the queue.
-func (s *manager) Queue(ctx context.Context, hash uint64, d []byte) {
+func (s *manager) Queue(ctx context.Context, hash uint64, d types.TimeSeries) {
 	// Based on a hash which is the label hash add to the queue.
 	queueNum := hash % s.connectionCount
 	s.loops[queueNum].seriesMbx.Send(ctx, d)
 }
 
 // QueueMetadata adds metadata to the queue.
-func (s *manager) QueueMetadata(ctx context.Context, d []byte) {
+func (s *manager) QueueMetadata(ctx context.Context, d types.MetaSeries) {
 	s.metadata.metaSeriesMbx.Send(ctx, d)
 }

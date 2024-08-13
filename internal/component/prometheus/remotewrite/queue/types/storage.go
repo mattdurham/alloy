@@ -13,6 +13,6 @@ type FileStorage interface {
 type Serializer interface {
 	Start()
 	Stop()
-	SendSeries(ctx context.Context, data []Raw) error
-	SendMetadata(ctx context.Context, data []RawMetadata) error
+	SendSeries(ctx context.Context, data []TimeSeries) error
+	SendMetadata(ctx context.Context, data []MetaSeries) error
 }

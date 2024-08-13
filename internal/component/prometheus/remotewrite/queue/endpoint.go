@@ -91,7 +91,7 @@ func (ep *endpoint) handleItem(buf []byte) {
 		if old > ep.ttl {
 			continue
 		}
-		sendErr := ep.client.SendSeries(context.Background(), series.Hash, series.Bytes)
+		sendErr := ep.client.SendSeries(context.Background(), series.Hash, series)
 		if sendErr != nil {
 			level.Error(ep.log).Log("msg", "error sending to write client", "err", sendErr)
 		}

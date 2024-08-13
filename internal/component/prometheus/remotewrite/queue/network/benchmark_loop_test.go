@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/go-kit/log"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
-	"github.com/prometheus/prometheus/prompb"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -17,22 +16,20 @@ func BenchmarkLoopAllocs(b *testing.B) {
 		return
 	}))
 	logger := log.NewNopLogger()
-	s := prompb.Sample{
-		Value:     0,
-		Timestamp: time.Now().Unix(),
-	}
-	lbls := make([]prompb.Label, 0)
+
+	lbls := make([]types.Label, 0)
 	for i := 0; i < 20; i++ {
-		lbls = append(lbls, prompb.Label{
+		lbls = append(lbls, types.Label{
 			Name:  fmt.Sprintf("label_%d", i),
 			Value: fmt.Sprintf("value_%d", i),
 		})
 	}
-	ts := prompb.TimeSeries{
-		Samples: []prompb.Sample{s},
-		Labels:  lbls,
+	ts := types.TimeSeries{
+		Labels: lbls,
+		TS:     time.Now().Unix(),
+		Value:  1,
+		Hash:   1,
 	}
-	buf, _ := ts.Marshal()
 	l := newLoop(ConnectionConfig{
 		URL:                     srv.URL,
 		Timeout:                 1 * time.Second,
@@ -47,7 +44,7 @@ func BenchmarkLoopAllocs(b *testing.B) {
 	l.Start()
 	defer l.Stop()
 	for i := 0; i < 10_000; i++ {
-		l.seriesMbx.Send(context.Background(), buf)
+		l.seriesMbx.Send(context.Background(), ts)
 	}
 	l.Stop()
 

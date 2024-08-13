@@ -13,8 +13,8 @@ import (
 )
 
 type Serializer struct {
-	inbox         actor.Mailbox[[]types.Raw]
-	metaInbox     actor.Mailbox[[]types.RawMetadata]
+	inbox         actor.Mailbox[[]types.TimeSeries]
+	metaInbox     actor.Mailbox[[]types.MetaSeries]
 	maxSizeBytes  int
 	flushDuration time.Duration
 	queue         types.FileStorage
@@ -31,12 +31,12 @@ func NewSerializer(maxSizeBytes int, flushDuration time.Duration, q types.FileSt
 		flushDuration: flushDuration,
 		queue:         q,
 		group: &types.SeriesGroup{
-			Series:   make([]types.Raw, 0),
-			Metadata: make([]types.Raw, 0),
+			Series:   make([]types.TimeSeries, 0),
+			Metadata: make([]types.MetaSeries, 0),
 		},
 		logger:    l,
-		inbox:     actor.NewMailbox[[]types.Raw](),
-		metaInbox: actor.NewMailbox[[]types.RawMetadata](),
+		inbox:     actor.NewMailbox[[]types.TimeSeries](),
+		metaInbox: actor.NewMailbox[[]types.MetaSeries](),
 	}
 
 	return s, nil
@@ -53,19 +53,19 @@ func (s *Serializer) Stop() {
 	s.self.Stop()
 }
 
-func (s *Serializer) SendSeries(ctx context.Context, data []types.Raw) error {
+func (s *Serializer) SendSeries(ctx context.Context, data []types.TimeSeries) error {
 	return s.inbox.Send(ctx, data)
 }
 
-func (s *Serializer) SendMetadata(ctx context.Context, data []types.RawMetadata) error {
+func (s *Serializer) SendMetadata(ctx context.Context, data []types.MetaSeries) error {
 	return s.metaInbox.Send(ctx, data)
 }
 
-func (s *Serializer) Mailbox() actor.MailboxSender[[]types.Raw] {
+func (s *Serializer) Mailbox() actor.MailboxSender[[]types.TimeSeries] {
 	return s.inbox
 }
 
-func (s *Serializer) MetaMailbox() actor.MailboxSender[[]types.RawMetadata] {
+func (s *Serializer) MetaMailbox() actor.MailboxSender[[]types.MetaSeries] {
 	return s.metaInbox
 }
 
@@ -89,14 +89,14 @@ func (s *Serializer) DoWork(ctx actor.Context) actor.WorkerStatus {
 	}
 }
 
-func (s *Serializer) AppendMetadata(ctx actor.Context, data []types.RawMetadata) error {
+func (s *Serializer) AppendMetadata(ctx actor.Context, data []types.MetaSeries) error {
 	if len(data) == 0 {
 		return nil
 	}
 
 	for _, d := range data {
-		s.group.Metadata = append(s.group.Series, d.Raw)
-		s.bytesInGroup = s.bytesInGroup + uint32(len(d.Bytes)) + 4
+		s.group.Metadata = append(s.group.Metadata, d)
+		s.bytesInGroup = s.bytesInGroup + uint32(d.ByteLength()) + 4
 	}
 	// If we would go over the max size then send, or if we have hit the flush duration then send.
 	if s.bytesInGroup > uint32(s.maxSizeBytes) {
@@ -108,14 +108,14 @@ func (s *Serializer) AppendMetadata(ctx actor.Context, data []types.RawMetadata)
 	return nil
 }
 
-func (s *Serializer) Append(ctx actor.Context, data []types.Raw) error {
+func (s *Serializer) Append(ctx actor.Context, data []types.TimeSeries) error {
 	if len(data) == 0 {
 		return nil
 	}
 
 	for _, d := range data {
 		s.group.Series = append(s.group.Series, d)
-		s.bytesInGroup = s.bytesInGroup + uint32(len(d.Bytes)) + 4
+		s.bytesInGroup = s.bytesInGroup + uint32(d.ByteLength()) + 4
 	}
 	// If we would go over the max size then send, or if we have hit the flush duration then send.
 	if s.bytesInGroup > uint32(s.maxSizeBytes) {
