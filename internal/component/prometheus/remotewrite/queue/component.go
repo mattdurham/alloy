@@ -2,17 +2,18 @@ package queue
 
 import (
 	"context"
+	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/filequeue"
+	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/network"
+	"github.com/prometheus/client_golang/prometheus"
 	"path/filepath"
+	"reflect"
 	"sync"
 
 	"github.com/go-kit/log"
 	"github.com/grafana/alloy/internal/component"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/cbor"
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/filequeue"
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/network"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 	"github.com/grafana/alloy/internal/featuregate"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/storage"
 )
 
@@ -36,6 +37,10 @@ func NewComponent(opts component.Options, args types.Arguments) (*Queue, error) 
 		endpoints: map[string]*endpoint{},
 	}
 	s.opts.OnStateChange(types.Exports{Receiver: s})
+	err := s.createEndpoints()
+	if err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 
@@ -47,52 +52,13 @@ type Queue struct {
 	opts      component.Options
 	log       log.Logger
 	endpoints map[string]*endpoint
+	ctx       context.Context
 }
 
 // Run starts the component, blocking until ctx is canceled or the component
 // suffers a fatal error. Run is guaranteed to be called exactly once per
 // Component.
 func (s *Queue) Run(ctx context.Context) error {
-	for _, ep := range s.args.Connections {
-		reg := prometheus.WrapRegistererWith(prometheus.Labels{"endpoint": ep.Name}, s.opts.Registerer)
-		stats := types.NewStats("alloy", "queue_series", reg)
-		stats.BackwardsCompatibility(reg)
-		meta := types.NewStats("alloy", "queue_metadata", reg)
-		client, err := network.New(ctx, network.ConnectionConfig{
-			URL:            ep.URL,
-			Username:       ep.BasicAuth.Username,
-			Password:       ep.BasicAuth.Password,
-			BatchCount:     ep.BatchCount,
-			FlushDuration:  ep.FlushDuration,
-			Timeout:        ep.Timeout,
-			UserAgent:      "alloy",
-			ExternalLabels: s.args.ExternalLabels,
-			Connections:    uint64(ep.QueueCount),
-		}, s.log, stats.UpdateNetwork, meta.UpdateNetwork)
-
-		end := &endpoint{
-			client:    client,
-			stat:      stats,
-			metaStats: meta,
-			ctx:       ctx,
-			log:       s.opts.Logger,
-			ttl:       s.args.TTL,
-		}
-
-		fq, err := filequeue.NewQueue(filepath.Join(s.opts.DataPath, ep.Name, "wal"), func(ctx context.Context, dh types.DataHandle) {
-			_ = end.mbx.Send(ctx, dh)
-		}, s.opts.Logger)
-		if err != nil {
-			return err
-		}
-		serial, err := cbor.NewSerializer(s.args.BatchSizeBytes, s.args.FlushDuration, fq, s.opts.Logger)
-		if err != nil {
-			return err
-		}
-		end.serializer = serial
-		s.endpoints[ep.Name] = end
-		end.Start()
-	}
 	defer func() {
 		s.mut.Lock()
 		defer s.mut.Unlock()
@@ -121,39 +87,61 @@ func (s *Queue) Update(args component.Arguments) error {
 	sync.OnceFunc(func() {
 		s.opts.OnStateChange(types.Exports{Receiver: s})
 	})
+	// If they are the same do nothing.
+	if reflect.DeepEqual(newArgs, s.args) {
+		return nil
+	}
 	s.args = newArgs
-	return nil
-	/*
-		TODO @mattdurham need to cycle through the endpoints figuring out what changed.
-			if s.client == nil {
-				s.args = newArgs
-				return nil
-			}
-			if s.args.TriggerSerializationChange(newArgs) {
-				s.serializer.Update(newArgs.FlushDuration, newArgs.BatchSizeBytes)
-			}
-			if s.args.TriggerWriteClientChange(newArgs) {
-				// Send stop to all channels and rebuild.
-				s.client.Stop()
-				client, err := network.New(s.ctx, network.ConnectionConfig{
-					URL:            s.args.Connection.URL,
-					Username:       s.args.Connection.BasicAuth.Username,
-					Password:       s.args.Connection.BasicAuth.Password,
-					BatchCount:     s.args.Connection.BatchCount,
-					FlushDuration:  s.args.Connection.FlushDuration,
-					Timeout:        s.args.Connection.Timeout,
-					UserAgent:      "alloy",
-					ExternalLabels: s.args.ExternalLabels,
-				}, uint64(s.args.Connection.QueueCount), s.log, s.stat.UpdateNetwork, s.metaStats.UpdateNetwork)
-				if err != nil {
-					return err
-				}
-				s.client = client
-			}
-			s.args = newArgs
-			return nil
+	// TODO @mattdurham need to cycle through the endpoints figuring out what changed instead of this global stop and start..
+	if len(s.endpoints) > 0 {
+		for _, ep := range s.endpoints {
+			ep.Stop()
+		}
+		s.endpoints = map[string]*endpoint{}
+	}
+	return s.createEndpoints()
+}
 
-	*/
+func (s *Queue) createEndpoints() error {
+	for _, ep := range s.args.Connections {
+		reg := prometheus.WrapRegistererWith(prometheus.Labels{"endpoint": ep.Name}, s.opts.Registerer)
+		stats := types.NewStats("alloy", "queue_series", reg)
+		stats.BackwardsCompatibility(reg)
+		meta := types.NewStats("alloy", "queue_metadata", reg)
+		client, err := network.New(network.ConnectionConfig{
+			URL:            ep.URL,
+			Username:       ep.BasicAuth.Username,
+			Password:       string(ep.BasicAuth.Password),
+			BatchCount:     ep.BatchCount,
+			FlushDuration:  ep.FlushDuration,
+			Timeout:        ep.Timeout,
+			UserAgent:      "alloy",
+			ExternalLabels: s.args.ExternalLabels,
+			Connections:    uint64(ep.QueueCount),
+		}, s.log, stats.UpdateNetwork, meta.UpdateNetwork)
+
+		// Serializer is set after
+		end := NewEndpoint(client, nil, stats, meta, s.args.TTL, s.opts.Logger)
+		wg := sync.WaitGroup{}
+		// This wait group is to ensure we are started before we send on the mailbox.
+		wg.Add(1)
+		fq, err := filequeue.NewQueue(filepath.Join(s.opts.DataPath, ep.Name, "wal"), func(ctx context.Context, dh types.DataHandle) {
+			wg.Wait()
+			_ = end.mbx.Send(ctx, dh)
+		}, s.opts.Logger)
+		if err != nil {
+			return err
+		}
+		serial, err := cbor.NewSerializer(s.args.BatchSizeBytes, s.args.FlushDuration, fq, s.opts.Logger)
+		if err != nil {
+			return err
+		}
+		end.serializer = serial
+		s.endpoints[ep.Name] = end
+		end.Start()
+		wg.Done()
+	}
+	return nil
 }
 
 // Appender returns a new appender for the storage. The implementation

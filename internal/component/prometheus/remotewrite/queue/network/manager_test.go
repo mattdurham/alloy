@@ -40,7 +40,7 @@ func TestSending(t *testing.T) {
 	}
 
 	logger := log.NewNopLogger()
-	wr, err := New(ctx, cc, logger, func(s types.NetworkStats) {}, func(s types.NetworkStats) {})
+	wr, err := New(cc, logger, func(s types.NetworkStats) {}, func(s types.NetworkStats) {})
 	wr.Start()
 	defer wr.Stop()
 	require.NoError(t, err)
@@ -81,7 +81,7 @@ func TestRetry(t *testing.T) {
 	}
 
 	logger := log.NewNopLogger()
-	wr, err := New(ctx, cc, logger, func(s types.NetworkStats) {}, func(s types.NetworkStats) {})
+	wr, err := New(cc, logger, func(s types.NetworkStats) {}, func(s types.NetworkStats) {})
 	require.NoError(t, err)
 	wr.Start()
 	defer wr.Stop()
@@ -120,7 +120,7 @@ func TestRetryBounded(t *testing.T) {
 	}
 
 	logger := log.NewNopLogger()
-	wr, err := New(ctx, cc, logger, func(s types.NetworkStats) {}, func(s types.NetworkStats) {})
+	wr, err := New(cc, logger, func(s types.NetworkStats) {}, func(s types.NetworkStats) {})
 	wr.Start()
 	defer wr.Stop()
 	require.NoError(t, err)
@@ -158,7 +158,7 @@ func TestRecoverable(t *testing.T) {
 	}
 
 	logger := log.NewNopLogger()
-	wr, err := New(ctx, cc, logger, func(s types.NetworkStats) {
+	wr, err := New(cc, logger, func(s types.NetworkStats) {
 		recoverable.Add(uint32(s.Retries5XX))
 	}, func(s types.NetworkStats) {})
 	require.NoError(t, err)
@@ -199,7 +199,7 @@ func TestNonRecoverable(t *testing.T) {
 	}
 
 	logger := log.NewNopLogger()
-	wr, err := New(ctx, cc, logger, func(s types.NetworkStats) {
+	wr, err := New(cc, logger, func(s types.NetworkStats) {
 		nonRecoverable.Add(uint32(s.Fails))
 	}, func(s types.NetworkStats) {})
 	wr.Start()

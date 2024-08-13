@@ -43,11 +43,13 @@ func NewSerializer(maxSizeBytes int, flushDuration time.Duration, q types.FileSt
 }
 
 func (s *Serializer) Start() {
+	s.queue.Start()
 	s.self = actor.Combine(actor.New(s), s.inbox, s.metaInbox).Build()
 	s.self.Start()
 }
 
 func (s *Serializer) Stop() {
+	s.queue.Stop()
 	s.self.Stop()
 }
 

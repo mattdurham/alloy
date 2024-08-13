@@ -69,9 +69,12 @@ func NewQueue(directory string, out func(ctx context.Context, dh types.DataHandl
 
 	// Push the files that currently exist to the channel.
 	for _, id := range ids {
+		name := filepath.Join(directory, fmt.Sprintf("%d.committed", id))
 		q.out(context.TODO(), types.DataHandle{
-			Name: filepath.Join(directory, fmt.Sprintf("%d.committed", id)),
-			Get:  get,
+			Name: name,
+			Get: func() (map[string]string, []byte, error) {
+				return get(name)
+			},
 		})
 	}
 	return q, nil
@@ -113,7 +116,9 @@ func (q *queue) DoWork(ctx actor.Context) actor.WorkerStatus {
 		}
 		q.out(ctx, types.DataHandle{
 			Name: name,
-			Get:  get,
+			Get: func() (map[string]string, []byte, error) {
+				return get(name)
+			},
 		})
 		return actor.WorkerContinue
 	}

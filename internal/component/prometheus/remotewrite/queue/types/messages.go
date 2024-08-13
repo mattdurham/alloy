@@ -23,5 +23,5 @@ type Data struct {
 
 type DataHandle struct {
 	Name string
-	Get  func(name string) (map[string]string, []byte, error)
+	Get  func() (map[string]string, []byte, error)
 }

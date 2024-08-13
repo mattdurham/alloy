@@ -25,7 +25,7 @@ var _ types.NetworkClient = (*manager)(nil)
 
 var _ actor.Worker = (*manager)(nil)
 
-func New(ctx context.Context, cc ConnectionConfig, logger log.Logger, seriesStats, metadataStats func(types.NetworkStats)) (types.NetworkClient, error) {
+func New(cc ConnectionConfig, logger log.Logger, seriesStats, metadataStats func(types.NetworkStats)) (types.NetworkClient, error) {
 	s := &manager{
 		connectionCount: cc.Connections,
 		loops:           make([]*loop, 0),
@@ -57,6 +57,8 @@ func (s *manager) Start() {
 	actors = append(actors, s.inbox)
 	actors = append(actors, s.metaInbox)
 	actors = append(actors, actor.New(s))
+	s.self = actor.Combine(actors...).Build()
+	s.self.Start()
 }
 
 func (s *manager) SendSeries(ctx context.Context, hash uint64, data []byte) error {

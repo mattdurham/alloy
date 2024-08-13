@@ -1839,6 +1839,8 @@ github.com/openzipkin/zipkin-go v0.2.2/go.mod h1:NaW6tEwdmWMaCDZzg8sh+IBNOxHMPnh
 github.com/openzipkin/zipkin-go v0.4.3 h1:9EGwpqkgnwdEIJ+Od7QVSEIH+ocmm5nPat0G7sjsSdg=
 github.com/openzipkin/zipkin-go v0.4.3/go.mod h1:M9wCJZFWCo2RiY+o1eBCEMe0Dp2S5LDHcMZmk3RmK7c=
 github.com/openzipkin/zipkin-go-opentracing v0.3.4/go.mod h1:js2AbwmHW0YD9DwIw2JhQWmbfFi/UnWyYwdVhqbCDOE=
+github.com/ortuman/nuke v1.3.0 h1:NBZjV6gv4bOuND0n5gC2jcQgEWKGVyv43X9Bi/2ioXI=
+github.com/ortuman/nuke v1.3.0/go.mod h1:muDIne2xoAwuwHtAJ05/YSlKeCT5+XgFCwBju5ueoAQ=
 github.com/ory/dockertest v3.3.4+incompatible/go.mod h1:1vX4m9wsvi00u5bseYwXaSnhNrne+V0E6LAcBILJdPs=
 github.com/ory/dockertest/v3 v3.8.1 h1:vU/8d1We4qIad2YM0kOwRVtnyue7ExvacPiw1yDm17g=
 github.com/ory/dockertest/v3 v3.8.1/go.mod h1:wSRQ3wmkz+uSARYMk7kVJFDBGm8x5gSxIhI7NDc+BAQ=
@@ -2463,8 +2465,6 @@ go.uber.org/zap v1.27.0 h1:aJMhYGrd5QSmlpLMr2MftRKl7t8J8PTZPA732ud/XR8=
 go.uber.org/zap v1.27.0/go.mod h1:GB2qFLM7cTU87MWRP2mPIjqfIDnGu+VIO4V/SdhGo2E=
 go4.org/netipx v0.0.0-20230125063823-8449b0a6169f h1:ketMxHg+vWm3yccyYiq+uK8D3fRmna2Fcj+awpQp84s=
 go4.org/netipx v0.0.0-20230125063823-8449b0a6169f/go.mod h1:tgPU4N2u9RByaTN3NC2p9xOzyFpte4jYwsIIRF7XlSc=
-golang.design/x/chann v0.1.2 h1:eHF9wjuQnpp+j4ryWhyxC/pFuYzbvMAkudA/I5ALovY=
-golang.design/x/chann v0.1.2/go.mod h1:Rh5KhCAp+0qu9+FfKPymHpu8onmjl89sFwMeiw3SK14=
 golang.org/x/arch v0.7.0 h1:pskyeJh/3AmoQ8CPE95vxHLqp1G1GfGNXTmcl9NEKTc=
 golang.org/x/arch v0.7.0/go.mod h1:FEVrYAQjsQXMVJ1nsMoVVXPZg6p2JE2mx8psSWTDQys=
 golang.org/x/crypto v0.0.0-20180904163835-0709b304e793/go.mod h1:6SG95UA2DQfeDnfUPMdvaQW0Q7yPrPDi9nlGo2tz2b4=

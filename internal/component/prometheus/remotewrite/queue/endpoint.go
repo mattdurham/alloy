@@ -8,11 +8,6 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
-	"github.com/prometheus/prometheus/model/exemplar"
-	"github.com/prometheus/prometheus/model/histogram"
-	"github.com/prometheus/prometheus/model/labels"
-	"github.com/prometheus/prometheus/model/metadata"
-	"github.com/prometheus/prometheus/storage"
 	"github.com/vladopajic/go-actor/actor"
 )
 
@@ -31,12 +26,29 @@ type endpoint struct {
 	self       actor.Actor
 }
 
+func NewEndpoint(client types.NetworkClient, serializer types.Serializer, stats, metatStats *types.PrometheusStats, ttl time.Duration, logger log.Logger) *endpoint {
+	return &endpoint{
+		client:     client,
+		serializer: serializer,
+		stat:       stats,
+		metaStats:  metatStats,
+		log:        logger,
+		ttl:        ttl,
+		mbx:        actor.NewMailbox[types.DataHandle](),
+		buf:        make([]byte, 0, 1024),
+	}
+}
+
 func (ep *endpoint) Start() {
 	ep.self = actor.Combine(actor.New(ep), ep.mbx).Build()
 	ep.self.Start()
+	ep.serializer.Start()
+	ep.client.Start()
 }
 
 func (ep *endpoint) Stop() {
+	ep.serializer.Stop()
+	ep.client.Stop()
 	ep.client.Stop()
 	ep.self.Stop()
 }
@@ -49,7 +61,7 @@ func (ep *endpoint) DoWork(ctx actor.Context) actor.WorkerStatus {
 		if !ok {
 			return actor.WorkerEnd
 		}
-		_, buf, err := item.Get(item.Name)
+		_, buf, err := item.Get()
 		if err != nil {
 			return actor.WorkerEnd
 		}
@@ -91,80 +103,4 @@ func (ep *endpoint) handleItem(buf []byte) {
 			level.Error(ep.log).Log("msg", "error sending metadata to write client", "err", sendErr)
 		}
 	}
-}
-
-var _ storage.Appender = (*fanout)(nil)
-
-type fanout struct {
-	children []storage.Appender
-}
-
-func (f fanout) Append(ref storage.SeriesRef, l labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
-	for _, child := range f.children {
-		_, err := child.Append(ref, l, t, v)
-		if err != nil {
-			return ref, err
-		}
-	}
-	return ref, nil
-}
-
-func (f fanout) Commit() error {
-	for _, child := range f.children {
-		err := child.Commit()
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (f fanout) Rollback() error {
-	for _, child := range f.children {
-		err := child.Rollback()
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (f fanout) AppendExemplar(ref storage.SeriesRef, l labels.Labels, e exemplar.Exemplar) (storage.SeriesRef, error) {
-	for _, child := range f.children {
-		_, err := child.AppendExemplar(ref, l, e)
-		if err != nil {
-			return ref, err
-		}
-	}
-	return ref, nil
-}
-
-func (f fanout) AppendHistogram(ref storage.SeriesRef, l labels.Labels, t int64, h *histogram.Histogram, fh *histogram.FloatHistogram) (storage.SeriesRef, error) {
-	for _, child := range f.children {
-		_, err := child.AppendHistogram(ref, l, t, h, fh)
-		if err != nil {
-			return ref, err
-		}
-	}
-	return ref, nil
-}
-
-func (f fanout) UpdateMetadata(ref storage.SeriesRef, l labels.Labels, m metadata.Metadata) (storage.SeriesRef, error) {
-	for _, child := range f.children {
-		_, err := child.UpdateMetadata(ref, l, m)
-		if err != nil {
-			return ref, err
-		}
-	}
-	return ref, nil
-}
-
-func (f fanout) AppendCTZeroSample(ref storage.SeriesRef, l labels.Labels, t, ct int64) (storage.SeriesRef, error) {
-	for _, child := range f.children {
-		_, err := child.AppendCTZeroSample(ref, l, t, ct)
-		if err != nil {
-			return ref, err
-		}
-	}
-	return ref, nil
 }

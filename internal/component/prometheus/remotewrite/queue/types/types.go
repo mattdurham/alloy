@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"github.com/grafana/alloy/syntax/alloytypes"
 	"math"
 	"reflect"
 	"time"
@@ -10,10 +11,21 @@ import (
 	"github.com/prometheus/prometheus/storage"
 )
 
+type TimeSeries struct {
+	Labels []Labels `cbor:"1,keyasint"`
+	TS     int64    `cbor:"2,keyasint"`
+	Value  float64  `cbor:"3,keyasint"`
+}
+
+type Labels struct {
+	Name  string `cbor:"1,keyasint"`
+	Value string `cbor:"2,keyasint"`
+}
+
 type SeriesGroup struct {
-	_        struct{} `cbor:",toarray"`
-	Series   []Raw    `cbor:"1,keyasint"`
-	Metadata []Raw    `cbor:"2,keyasint"`
+	_        struct{}     `cbor:",toarray"`
+	Series   []TimeSeries `cbor:"1,keyasint"`
+	Metadata []TimeSeries `cbor:"2,keyasint"`
 }
 
 func DeserializeToSeriesGroup(buf []byte) (*SeriesGroup, error) {
@@ -29,6 +41,11 @@ func DeserializeToSeriesGroup(buf []byte) (*SeriesGroup, error) {
 	return sg, err
 }
 
+type MetaSeries struct {
+	TimeSeries
+}
+
+/*
 type Raw struct {
 	_     struct{} `cbor:",toarray"`
 	Hash  uint64   `cbor:"1,keyasint"`
@@ -38,7 +55,7 @@ type Raw struct {
 
 type RawMetadata struct {
 	Raw
-}
+}*/
 
 func defaultArgs() Arguments {
 	return Arguments{
@@ -99,8 +116,8 @@ type ConnectionConfig struct {
 }
 
 type BasicAuth struct {
-	Username string `alloy:"username,attr,optional"`
-	Password string `alloy:"password,attr,optional"`
+	Username string            `alloy:"username,attr,optional"`
+	Password alloytypes.Secret `alloy:"password,attr,optional"`
 }
 
 type Exports struct {

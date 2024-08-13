@@ -15,6 +15,7 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
+	"github.com/ortuman/nuke"
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/vladopajic/go-actor/actor"
 	"go.uber.org/atomic"
@@ -75,6 +76,7 @@ func (l *loop) Stop() {
 
 func (l *loop) actors() []actor.Actor {
 	return []actor.Actor{
+		actor.New(l),
 		l.metaSeriesMbx,
 		l.seriesMbx,
 		l.configMbx,
@@ -177,13 +179,15 @@ func (l *loop) send(series [][]byte, retryCount int) sendResult {
 	result := sendResult{}
 	l.pbuf.Reset()
 	l.seriesBuf = l.seriesBuf[:0]
+	arena := nuke.NewMonotonicArena(256*1024, 80)
+	defer arena.Reset(true)
 	for _, tsBuf := range series {
-		ts := prompb.TimeSeries{}
-		err := proto.Unmarshal(tsBuf, &ts)
+		ts := nuke.New[prompb.TimeSeries](arena)
+		err := ts.Unmarshal(tsBuf)
 		if err != nil {
 			continue
 		}
-		l.seriesBuf = append(l.seriesBuf, ts)
+		l.seriesBuf = append(l.seriesBuf, *ts)
 	}
 	req := &prompb.WriteRequest{
 		Timeseries: l.seriesBuf,
