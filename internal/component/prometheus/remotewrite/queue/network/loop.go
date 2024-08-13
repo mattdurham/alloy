@@ -69,6 +69,7 @@ func (l *loop) Start() {
 }
 
 func (l *loop) Stop() {
+	l.stopCalled.Store(true)
 	l.self.Stop()
 }
 

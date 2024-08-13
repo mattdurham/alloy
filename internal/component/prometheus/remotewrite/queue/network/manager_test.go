@@ -2,8 +2,6 @@ package network
 
 import (
 	"context"
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
-	"go.uber.org/goleak"
 	"io"
 	"math/rand"
 	"net/http"
@@ -13,9 +11,11 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/golang/snappy"
+	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
+	"go.uber.org/goleak"
 )
 
 func TestSending(t *testing.T) {
@@ -36,10 +36,11 @@ func TestSending(t *testing.T) {
 		Timeout:       1 * time.Second,
 		BatchCount:    10,
 		FlushDuration: 1 * time.Second,
+		Connections:   4,
 	}
 
 	logger := log.NewNopLogger()
-	wr, err := New(ctx, cc, 4, logger, func(s types.NetworkStats) {}, func(s types.NetworkStats) {})
+	wr, err := New(ctx, cc, logger, func(s types.NetworkStats) {}, func(s types.NetworkStats) {})
 	wr.Start()
 	defer wr.Stop()
 	require.NoError(t, err)
@@ -76,10 +77,11 @@ func TestRetry(t *testing.T) {
 		BatchCount:    1,
 		FlushDuration: 1 * time.Second,
 		RetryBackoff:  100 * time.Millisecond,
+		Connections:   1,
 	}
 
 	logger := log.NewNopLogger()
-	wr, err := New(ctx, cc, 1, logger, func(s types.NetworkStats) {}, func(s types.NetworkStats) {})
+	wr, err := New(ctx, cc, logger, func(s types.NetworkStats) {}, func(s types.NetworkStats) {})
 	require.NoError(t, err)
 	wr.Start()
 	defer wr.Stop()
@@ -114,10 +116,11 @@ func TestRetryBounded(t *testing.T) {
 		FlushDuration:           1 * time.Second,
 		RetryBackoff:            100 * time.Millisecond,
 		MaxRetryBackoffAttempts: 1,
+		Connections:             1,
 	}
 
 	logger := log.NewNopLogger()
-	wr, err := New(ctx, cc, 1, logger, func(s types.NetworkStats) {}, func(s types.NetworkStats) {})
+	wr, err := New(ctx, cc, logger, func(s types.NetworkStats) {}, func(s types.NetworkStats) {})
 	wr.Start()
 	defer wr.Stop()
 	require.NoError(t, err)
@@ -151,10 +154,11 @@ func TestRecoverable(t *testing.T) {
 		FlushDuration:           1 * time.Second,
 		RetryBackoff:            100 * time.Millisecond,
 		MaxRetryBackoffAttempts: 1,
+		Connections:             1,
 	}
 
 	logger := log.NewNopLogger()
-	wr, err := New(ctx, cc, 1, logger, func(s types.NetworkStats) {
+	wr, err := New(ctx, cc, logger, func(s types.NetworkStats) {
 		recoverable.Add(uint32(s.Retries5XX))
 	}, func(s types.NetworkStats) {})
 	require.NoError(t, err)
@@ -191,10 +195,11 @@ func TestNonRecoverable(t *testing.T) {
 		FlushDuration:           1 * time.Second,
 		RetryBackoff:            100 * time.Millisecond,
 		MaxRetryBackoffAttempts: 1,
+		Connections:             1,
 	}
 
 	logger := log.NewNopLogger()
-	wr, err := New(ctx, cc, 1, logger, func(s types.NetworkStats) {
+	wr, err := New(ctx, cc, logger, func(s types.NetworkStats) {
 		nonRecoverable.Add(uint32(s.Fails))
 	}, func(s types.NetworkStats) {})
 	wr.Start()

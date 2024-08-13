@@ -2,13 +2,9 @@ package network
 
 import (
 	"context"
-	"net/http"
-	"time"
 
 	"github.com/go-kit/log"
-	"github.com/gogo/protobuf/proto"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
-	"github.com/prometheus/prometheus/prompb"
 	"github.com/vladopajic/go-actor/actor"
 )
 
@@ -21,25 +17,13 @@ type manager struct {
 	metaInbox       actor.Mailbox[types.NetworkMetadataItem]
 	self            actor.Actor
 	cfg             ConnectionConfig
+	stats           func(types.NetworkStats)
+	metaStats       func(types.NetworkStats)
 }
 
 var _ types.NetworkClient = (*manager)(nil)
 
 var _ actor.Worker = (*manager)(nil)
-
-type ConnectionConfig struct {
-	URL                     string
-	Username                string
-	Password                string
-	UserAgent               string
-	Timeout                 time.Duration
-	RetryBackoff            time.Duration
-	MaxRetryBackoffAttempts time.Duration
-	BatchCount              int
-	FlushDuration           time.Duration
-	ExternalLabels          map[string]string
-	Connections             uint64
-}
 
 func New(ctx context.Context, cc ConnectionConfig, logger log.Logger, seriesStats, metadataStats func(types.NetworkStats)) (types.NetworkClient, error) {
 	s := &manager{
@@ -48,6 +32,7 @@ func New(ctx context.Context, cc ConnectionConfig, logger log.Logger, seriesStat
 		logger:          logger,
 		inbox:           actor.NewMailbox[types.NetworkQueueItem](actor.OptCapacity(1)),
 		metaInbox:       actor.NewMailbox[types.NetworkMetadataItem](actor.OptCapacity(1)),
+		stats:           seriesStats,
 	}
 
 	// start kicks off a number of concurrent connections.
@@ -108,40 +93,28 @@ func (s *manager) DoWork(ctx actor.Context) actor.WorkerStatus {
 }
 
 func (s *manager) updateConfig(cc ConnectionConfig) {
-	// Did the batchcount change, if so we need to recreate all the items.
+	// No need to do anything if the configuration is the same.
+	if s.cfg.Equals(cc) {
+		return
+	}
+	// TODO @mattdurham make this smarter.
 
-	if cc.BatchCount != s.cfg.BatchCount {
-		// Rebuild all the connections.
+	// For the moment we will stop all the items and recreate them.
+	for _, l := range s.loops {
+		l.Stop()
+	}
+	s.metadata.Stop()
+
+	s.loops = make([]*loop, 0)
+	var i uint64
+	for ; i < s.connectionCount; i++ {
+		l := newLoop(cc, s.logger, s.stats)
+		l.self = actor.New(l)
+		s.loops = append(s.loops, l)
 	}
 
-	// 1. Did the configuration count change?
-	if cc.Connections != s.cfg.Connections {
-		// What to do if its less?
-
-		// If its more?
-		if cc.Connections > s.cfg.Connections {
-			// Add more connections.
-			for i := s.cfg.Connections; i < cc.Connections; i++ {
-				l := &loop{
-					seriesMbx:      actor.NewMailbox[[]byte](actor.OptCapacity(2 * cc.BatchCount)),
-					configMbx:      actor.NewMailbox[ConnectionConfig](),
-					metaSeriesMbx:  actor.NewMailbox[[]byte](),
-					batchCount:     cc.BatchCount,
-					flushTimer:     cc.FlushDuration,
-					client:         &http.Client{},
-					cfg:            cc,
-					pbuf:           proto.NewBuffer(nil),
-					buf:            make([]byte, 0),
-					log:            s.logger,
-					seriesBuf:      make([]prompb.TimeSeries, 0),
-					statsFunc:      s.metadata.statsFunc,
-					externalLabels: cc.ExternalLabels,
-				}
-				l.Start()
-				s.loops = append(s.loops, l)
-			}
-		}
-	}
+	s.metadata = newLoop(cc, s.logger, s.metaStats)
+	s.metadata.self = actor.New(s.metadata)
 }
 
 func (s *manager) Stop() {

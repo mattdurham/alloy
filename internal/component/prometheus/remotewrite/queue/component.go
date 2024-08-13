@@ -67,7 +67,8 @@ func (s *Queue) Run(ctx context.Context) error {
 			Timeout:        ep.Timeout,
 			UserAgent:      "alloy",
 			ExternalLabels: s.args.ExternalLabels,
-		}, uint64(ep.QueueCount), s.log, stats.UpdateNetwork, meta.UpdateNetwork)
+			Connections:    uint64(ep.QueueCount),
+		}, s.log, stats.UpdateNetwork, meta.UpdateNetwork)
 
 		end := &endpoint{
 			client:    client,
