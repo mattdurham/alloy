@@ -3,6 +3,7 @@ package types
 import (
 	"fmt"
 	"github.com/prometheus/prometheus/prompb"
+	"go.uber.org/atomic"
 	"math"
 	"reflect"
 	"sync"
@@ -23,7 +24,35 @@ var tsPool = sync.Pool{
 
 // GetTimeSeries returns a TimeSeries from the pool, when entirely done it should be returned to the pool.
 func GetTimeSeries() *TimeSeries {
+	OutStandingTimeSeries.Inc()
 	return tsPool.Get().(*TimeSeries)
+}
+
+var OutStandingTimeSeries = atomic.Int32{}
+
+func GetTimeSeriesSlice(n int) []*TimeSeries {
+	tss := make([]*TimeSeries, 0, n)
+	for i := 0; i < n; i++ {
+		tss = append(tss, GetTimeSeries())
+	}
+	return tss
+}
+
+func PutTimeSeriesSlice(tss []*TimeSeries) {
+	for _, ts := range tss {
+		PutTimeSeries(ts)
+	}
+}
+
+func PutTimeSeries(ts *TimeSeries) {
+	OutStandingTimeSeries.Dec()
+	ts.Labels = ts.Labels[:0]
+	ts.TS = 0
+	ts.Value = 0
+	ts.Hash = 0
+	ts.Histogram = nil
+	ts.FloatHistogram = nil
+	tsPool.Put(ts)
 }
 
 func (ts *TimeSeries) FromHistogram(timestamp int64, h *histogram.Histogram) {
@@ -57,20 +86,11 @@ func (ts *TimeSeries) FromFlotHistogram(timestamp int64, h *histogram.FloatHisto
 	}
 }
 
-func PutTimeSeries(ts *TimeSeries) {
-	ts.Labels = ts.Labels[:0]
-	ts.TS = 0
-	ts.Value = 0
-	ts.Hash = 0
-	ts.Histogram = nil
-	ts.FloatHistogram = nil
-	tsPool.Put(ts)
-}
-
 func (ts *TimeSeries) AddLabels(lbls labels.Labels) {
 	if cap(ts.Labels) < len(lbls) {
 		ts.Labels = make([]Label, len(lbls))
 	}
+	ts.Labels = ts.Labels[:len(lbls)]
 	for i, l := range lbls {
 		ts.Labels[i].Name = l.Name
 		ts.Labels[i].Value = l.Value
@@ -136,6 +156,24 @@ type FloatHistogram struct {
 	TimestampMillisecond int64              `cbor:"13,keyasint"`
 }
 
+func (h FloatHistogram) ToPromFloatHistogram() prompb.Histogram {
+	return prompb.Histogram{
+		Count:          &prompb.Histogram_CountFloat{CountFloat: h.Count.FloatValue},
+		Sum:            h.Sum,
+		Schema:         h.Schema,
+		ZeroThreshold:  h.ZeroThreshold,
+		ZeroCount:      &prompb.Histogram_ZeroCountFloat{ZeroCountFloat: h.ZeroCount.FloatValue},
+		NegativeSpans:  ToPromBucketSpans(h.NegativeSpans),
+		NegativeDeltas: h.NegativeDeltas,
+		NegativeCounts: h.NegativeCounts,
+		PositiveSpans:  ToPromBucketSpans(h.PositiveSpans),
+		PositiveDeltas: h.PositiveDeltas,
+		PositiveCounts: h.PositiveCounts,
+		ResetHint:      prompb.Histogram_ResetHint(h.ResetHint),
+		Timestamp:      h.TimestampMillisecond,
+	}
+}
+
 type HistogramCount struct {
 	IsInt      bool    `cbor:"1,keyasint"`
 	IntValue   uint64  `cbor:"2,keyasint"`
@@ -199,8 +237,7 @@ type SeriesGroup struct {
 	Metadata []*MetaSeries `cbor:"2,keyasint"`
 }
 
-func DeserializeToSeriesGroup(buf []byte) (*SeriesGroup, error) {
-	sg := &SeriesGroup{}
+func DeserializeToSeriesGroup(sg *SeriesGroup, buf []byte) (*SeriesGroup, error) {
 	decOpt := cbor.DecOptions{
 		MaxArrayElements: math.MaxInt32,
 	}
@@ -215,18 +252,6 @@ func DeserializeToSeriesGroup(buf []byte) (*SeriesGroup, error) {
 type MetaSeries struct {
 	TimeSeries
 }
-
-/*
-type Raw struct {
-	_     struct{} `cbor:",toarray"`
-	Hash  uint64   `cbor:"1,keyasint"`
-	Bytes []byte   `cbor:"2,keyasint"`
-	TS    int64    `cbor:"3,keyasint"`
-}
-
-type RawMetadata struct {
-	Raw
-}*/
 
 func defaultArgs() Arguments {
 	return Arguments{

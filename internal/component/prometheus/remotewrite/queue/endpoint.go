@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	snappy "github.com/eapache/go-xerial-snappy"
@@ -14,7 +15,7 @@ import (
 var _ actor.Worker = (*endpoint)(nil)
 
 type endpoint struct {
-	client     types.NetworkClient
+	network    types.NetworkClient
 	serializer types.Serializer
 	stat       *types.PrometheusStats
 	metaStats  *types.PrometheusStats
@@ -28,7 +29,7 @@ type endpoint struct {
 
 func NewEndpoint(client types.NetworkClient, serializer types.Serializer, stats, metatStats *types.PrometheusStats, ttl time.Duration, logger log.Logger) *endpoint {
 	return &endpoint{
-		client:     client,
+		network:    client,
 		serializer: serializer,
 		stat:       stats,
 		metaStats:  metatStats,
@@ -43,13 +44,13 @@ func (ep *endpoint) Start() {
 	ep.self = actor.Combine(actor.New(ep), ep.mbx).Build()
 	ep.self.Start()
 	ep.serializer.Start()
-	ep.client.Start()
+	ep.network.Start()
 }
 
 func (ep *endpoint) Stop() {
 	ep.serializer.Stop()
-	ep.client.Stop()
-	ep.client.Stop()
+	ep.network.Stop()
+	ep.network.Stop()
 	ep.self.Stop()
 }
 
@@ -61,16 +62,17 @@ func (ep *endpoint) DoWork(ctx actor.Context) actor.WorkerStatus {
 		if !ok {
 			return actor.WorkerEnd
 		}
-		_, buf, err := item.Get()
+		meta, buf, err := item.Get()
 		if err != nil {
 			return actor.WorkerEnd
 		}
-		ep.handleItem(buf)
+		ep.handleItem(meta, buf)
 		return actor.WorkerContinue
 	}
 }
 
-func (ep *endpoint) handleItem(buf []byte) {
+func (ep *endpoint) handleItem(meta map[string]string, buf []byte) {
+	itemCount, _ := strconv.Atoi(meta["series_count"])
 	level.Debug(ep.log).Log("msg", "handling buffer", "size", len(buf))
 	var err error
 	ep.buf, err = snappy.Decode(buf)
@@ -79,7 +81,9 @@ func (ep *endpoint) handleItem(buf []byte) {
 		return
 	}
 	level.Debug(ep.log).Log("msg", "deserializing buffer")
-	sg, err := types.DeserializeToSeriesGroup(ep.buf)
+	sg := &types.SeriesGroup{}
+	sg.Series = types.GetTimeSeriesSlice(itemCount)
+	sg, err = types.DeserializeToSeriesGroup(sg, ep.buf)
 	if err != nil {
 		level.Debug(ep.log).Log("msg", "error deserializing", "err", err)
 		return
@@ -93,14 +97,14 @@ func (ep *endpoint) handleItem(buf []byte) {
 		if old > ep.ttl {
 			continue
 		}
-		sendErr := ep.client.SendSeries(context.Background(), series.Hash, series)
+		sendErr := ep.network.SendSeries(context.Background(), series.Hash, series)
 		if sendErr != nil {
 			level.Error(ep.log).Log("msg", "error sending to write client", "err", sendErr)
 		}
 
 	}
 	for _, md := range sg.Metadata {
-		sendErr := ep.client.SendMetadata(context.Background(), md)
+		sendErr := ep.network.SendMetadata(context.Background(), md)
 		if sendErr != nil {
 			level.Error(ep.log).Log("msg", "error sending metadata to write client", "err", sendErr)
 		}

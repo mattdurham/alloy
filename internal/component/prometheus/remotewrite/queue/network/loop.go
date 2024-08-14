@@ -142,17 +142,17 @@ attempt:
 	})
 	level.Debug(l.log).Log("msg", "sending data result", "attempts", attempts, "successful", result.successful, "err", result.err)
 	if result.successful {
-		l.finishSending()
+		l.finishSending(series)
 		return
 	}
 	if !result.recoverableError {
-		l.finishSending()
+		l.finishSending(series)
 		return
 	}
 	attempts++
 	if attempts > int(l.cfg.MaxRetryBackoffAttempts) && l.cfg.MaxRetryBackoffAttempts > 0 {
 		level.Debug(l.log).Log("msg", "max attempts reached", "attempts", attempts)
-		l.finishSending()
+		l.finishSending(series)
 		return
 	}
 	l.statsFunc(types.NetworkStats{
@@ -171,7 +171,8 @@ type sendResult struct {
 	retryAfter       time.Duration
 }
 
-func (l *loop) finishSending() {
+func (l *loop) finishSending(series []*types.TimeSeries) {
+	types.PutTimeSeriesSlice(series)
 	l.lastSend = time.Now()
 }
 
@@ -189,11 +190,19 @@ func (l *loop) send(series []*types.TimeSeries, retryCount int) sendResult {
 		}
 		l.seriesBuf[i].Labels = l.seriesBuf[i].Labels[:len(tsBuf.Labels)]
 		if tsBuf.Histogram != nil {
-			if cap(l.seriesBuf[i].Histograms) < 1 {
+			if len(l.seriesBuf[i].Histograms) < 1 {
 				l.seriesBuf[i].Histograms = make([]prompb.Histogram, 1)
 			}
 			l.seriesBuf[i].Histograms[0] = tsBuf.Histogram.ToPromHistogram()
-		} else {
+		}
+		if tsBuf.FloatHistogram != nil {
+			if len(l.seriesBuf[i].Histograms) < 1 {
+				l.seriesBuf[i].Histograms = make([]prompb.Histogram, 1)
+			}
+			l.seriesBuf[i].Histograms[0] = tsBuf.FloatHistogram.ToPromFloatHistogram()
+		}
+
+		if tsBuf.Histogram == nil && tsBuf.FloatHistogram == nil {
 			l.seriesBuf[i].Histograms = l.seriesBuf[i].Histograms[:0]
 		}
 

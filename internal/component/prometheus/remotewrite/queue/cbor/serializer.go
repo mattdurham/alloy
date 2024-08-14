@@ -2,6 +2,7 @@ package cbor
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	snappy "github.com/eapache/go-xerial-snappy"
@@ -126,12 +127,6 @@ func (s *Serializer) Append(ctx actor.Context, data []*types.TimeSeries) error {
 	return nil
 }
 
-var version = map[string]string{
-	// product.signal_type.schema.version
-	"version":  "alloy.metrics.simple.v1",
-	"encoding": "snappy",
-}
-
 func (s *Serializer) store(ctx actor.Context) error {
 	s.lastFlush = time.Now()
 	if len(s.group.Series) == 0 {
@@ -142,19 +137,23 @@ func (s *Serializer) store(ctx actor.Context) error {
 		for _, ts := range s.group.Series {
 			types.PutTimeSeries(ts)
 		}
+		// We can reset the group now.
+		s.group.Series = s.group.Series[:0]
+		s.group.Metadata = s.group.Metadata[:0]
 	}()
 	buffer, err := cbor.Marshal(s.group)
-
-	// We can reset the group now.
-	s.group.Series = s.group.Series[:0]
-	s.group.Metadata = s.group.Metadata[:0]
-
 	if err != nil {
 		// Something went wrong with serializing the whole group so lets drop it.
 		return err
 	}
 	out := snappy.Encode(buffer)
-	err = s.queue.Send(ctx, version, out)
+	meta := map[string]string{
+		// product.signal_type.schema.version
+		"version":      "alloy.metrics.simple.v1",
+		"encoding":     "snappy",
+		"series_count": strconv.Itoa(len(s.group.Series)),
+	}
+	err = s.queue.Send(ctx, meta, out)
 	s.bytesInGroup = 0
 	return err
 }
