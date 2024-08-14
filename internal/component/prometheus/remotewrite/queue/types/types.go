@@ -2,20 +2,179 @@ package types
 
 import (
 	"fmt"
-	"github.com/grafana/alloy/syntax/alloytypes"
+	"github.com/prometheus/prometheus/prompb"
 	"math"
 	"reflect"
+	"sync"
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
+	"github.com/grafana/alloy/syntax/alloytypes"
+	"github.com/prometheus/prometheus/model/histogram"
+	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
 )
 
+var tsPool = sync.Pool{
+	New: func() any {
+		return &TimeSeries{}
+	},
+}
+
+// GetTimeSeries returns a TimeSeries from the pool, when entirely done it should be returned to the pool.
+func GetTimeSeries() *TimeSeries {
+	return tsPool.Get().(*TimeSeries)
+}
+
+func (ts *TimeSeries) FromHistogram(timestamp int64, h *histogram.Histogram) {
+	ts.Histogram = &Histogram{
+		Count:                HistogramCount{IsInt: true, IntValue: h.Count},
+		Sum:                  h.Sum,
+		Schema:               h.Schema,
+		ZeroThreshold:        h.ZeroThreshold,
+		ZeroCount:            HistogramZeroCount{IsInt: true, IntValue: h.ZeroCount},
+		NegativeSpans:        FromPromSpan(h.NegativeSpans),
+		NegativeBuckets:      h.NegativeBuckets,
+		PositiveSpans:        FromPromSpan(h.PositiveSpans),
+		PositiveBuckets:      h.PositiveBuckets,
+		ResetHint:            int32(h.CounterResetHint),
+		TimestampMillisecond: timestamp,
+	}
+}
+func (ts *TimeSeries) FromFlotHistogram(timestamp int64, h *histogram.FloatHistogram) {
+	ts.FloatHistogram = &FloatHistogram{
+		Count:                HistogramCount{IsInt: false, FloatValue: h.Count},
+		Sum:                  h.Sum,
+		Schema:               h.Schema,
+		ZeroThreshold:        h.ZeroThreshold,
+		ZeroCount:            HistogramZeroCount{IsInt: false, FloatValue: h.ZeroCount},
+		NegativeSpans:        FromPromSpan(h.NegativeSpans),
+		NegativeCounts:       h.NegativeBuckets,
+		PositiveSpans:        FromPromSpan(h.PositiveSpans),
+		PositiveCounts:       h.PositiveBuckets,
+		ResetHint:            int32(h.CounterResetHint),
+		TimestampMillisecond: timestamp,
+	}
+}
+
+func PutTimeSeries(ts *TimeSeries) {
+	ts.Labels = ts.Labels[:0]
+	ts.TS = 0
+	ts.Value = 0
+	ts.Hash = 0
+	ts.Histogram = nil
+	ts.FloatHistogram = nil
+	tsPool.Put(ts)
+}
+
+func (ts *TimeSeries) AddLabels(lbls labels.Labels) {
+	if cap(ts.Labels) < len(lbls) {
+		ts.Labels = make([]Label, len(lbls))
+	}
+	for i, l := range lbls {
+		ts.Labels[i].Name = l.Name
+		ts.Labels[i].Value = l.Value
+	}
+}
+
 type TimeSeries struct {
-	Labels []Label `cbor:"1,keyasint"`
-	TS     int64   `cbor:"2,keyasint"`
-	Value  float64 `cbor:"3,keyasint"`
-	Hash   uint64  `cbor:"3,keyasint"`
+	Labels         []Label         `cbor:"1,keyasint"`
+	TS             int64           `cbor:"2,keyasint"`
+	Value          float64         `cbor:"3,keyasint"`
+	Hash           uint64          `cbor:"4,keyasint"`
+	Histogram      *Histogram      `cbor:"5,keyasint"`
+	FloatHistogram *FloatHistogram `cbor:"6,keyasint"`
+}
+
+type Histogram struct {
+	Count                HistogramCount     `cbor:"1,keyasint"`
+	Sum                  float64            `cbor:"2,keyasint"`
+	Schema               int32              `cbor:"3,keyasint"`
+	ZeroThreshold        float64            `cbor:"4,keyasint"`
+	ZeroCount            HistogramZeroCount `cbor:"5,keyasint"`
+	NegativeSpans        []BucketSpan       `cbor:"6,keyasint"`
+	NegativeBuckets      []int64            `cbor:"7,keyasint"`
+	NegativeCounts       []float64          `cbor:"8,keyasint"`
+	PositiveSpans        []BucketSpan       `cbor:"9,keyasint"`
+	PositiveBuckets      []int64            `cbor:"10,keyasint"`
+	PositiveCounts       []float64          `cbor:"11,keyasint"`
+	ResetHint            int32              `cbor:"12,keyasint"`
+	TimestampMillisecond int64              `cbor:"13,keyasint"`
+}
+
+func (h Histogram) ToPromHistogram() prompb.Histogram {
+	return prompb.Histogram{
+		Count:          &prompb.Histogram_CountInt{CountInt: h.Count.IntValue},
+		Sum:            h.Sum,
+		Schema:         h.Schema,
+		ZeroThreshold:  h.ZeroThreshold,
+		ZeroCount:      &prompb.Histogram_ZeroCountInt{ZeroCountInt: h.ZeroCount.IntValue},
+		NegativeSpans:  ToPromBucketSpans(h.NegativeSpans),
+		NegativeDeltas: h.NegativeBuckets,
+		NegativeCounts: h.NegativeCounts,
+		PositiveSpans:  ToPromBucketSpans(h.PositiveSpans),
+		PositiveDeltas: h.PositiveBuckets,
+		PositiveCounts: h.NegativeCounts,
+		ResetHint:      prompb.Histogram_ResetHint(h.ResetHint),
+		Timestamp:      h.TimestampMillisecond,
+	}
+}
+
+type FloatHistogram struct {
+	Count                HistogramCount     `cbor:"1,keyasint"`
+	Sum                  float64            `cbor:"2,keyasint"`
+	Schema               int32              `cbor:"3,keyasint"`
+	ZeroThreshold        float64            `cbor:"4,keyasint"`
+	ZeroCount            HistogramZeroCount `cbor:"5,keyasint"`
+	NegativeSpans        []BucketSpan       `cbor:"6,keyasint"`
+	NegativeDeltas       []int64            `cbor:"7,keyasint"`
+	NegativeCounts       []float64          `cbor:"8,keyasint"`
+	PositiveSpans        []BucketSpan       `cbor:"9,keyasint"`
+	PositiveDeltas       []int64            `cbor:"10,keyasint"`
+	PositiveCounts       []float64          `cbor:"11,keyasint"`
+	ResetHint            int32              `cbor:"12,keyasint"`
+	TimestampMillisecond int64              `cbor:"13,keyasint"`
+}
+
+type HistogramCount struct {
+	IsInt      bool    `cbor:"1,keyasint"`
+	IntValue   uint64  `cbor:"2,keyasint"`
+	FloatValue float64 `cbor:"3,keyasint"`
+}
+
+type HistogramZeroCount struct {
+	IsInt      bool    `cbor:"1,keyasint"`
+	IntValue   uint64  `cbor:"2,keyasint"`
+	FloatValue float64 `cbor:"3,keyasint"`
+}
+
+type BucketSpan struct {
+	Offset int32  `cbor:"1,keyasint"`
+	Length uint32 `cbor:"2,keyasint"`
+}
+
+func ToPromBucketSpans(bss []BucketSpan) []prompb.BucketSpan {
+	spans := make([]prompb.BucketSpan, len(bss))
+	for i, bs := range bss {
+		spans[i] = bs.ToPromBucketSpan()
+	}
+	return spans
+}
+
+func (bs BucketSpan) ToPromBucketSpan() prompb.BucketSpan {
+	return prompb.BucketSpan{
+		Offset: bs.Offset,
+		Length: bs.Length,
+	}
+}
+
+func FromPromSpan(spans []histogram.Span) []BucketSpan {
+	bs := make([]BucketSpan, len(spans))
+	for i, s := range spans {
+		bs[i].Offset = s.Offset
+		bs[i].Length = s.Length
+	}
+	return bs
 }
 
 type Label struct {
@@ -35,9 +194,9 @@ func (ts TimeSeries) ByteLength() int {
 }
 
 type SeriesGroup struct {
-	_        struct{}     `cbor:",toarray"`
-	Series   []TimeSeries `cbor:"1,keyasint"`
-	Metadata []MetaSeries `cbor:"2,keyasint"`
+	_        struct{}      `cbor:",toarray"`
+	Series   []*TimeSeries `cbor:"1,keyasint"`
+	Metadata []*MetaSeries `cbor:"2,keyasint"`
 }
 
 func DeserializeToSeriesGroup(buf []byte) (*SeriesGroup, error) {

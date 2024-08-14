@@ -3,6 +3,7 @@ package filequeue
 import (
 	"context"
 	"fmt"
+	"github.com/grafana/alloy/internal/runtime/logging/level"
 	"os"
 	"path/filepath"
 	"sort"
@@ -110,10 +111,13 @@ func (q *queue) DoWork(ctx actor.Context) actor.WorkerStatus {
 	case <-ctx.Done():
 		return actor.WorkerEnd
 	case item := <-q.inbox.ReceiveC():
+		level.Debug(q.logger).Log("msg", "received item")
 		name, err := q.add(item.Meta, item.Data)
 		if err != nil {
+			level.Error(q.logger).Log("msg", "error adding item", "err", err)
 			return actor.WorkerContinue
 		}
+		level.Debug(q.logger).Log("msg", "writing item")
 		q.out(ctx, types.DataHandle{
 			Name: name,
 			Get: func() (map[string]string, []byte, error) {

@@ -13,16 +13,17 @@ import (
 )
 
 type Serializer struct {
-	inbox         actor.Mailbox[[]types.TimeSeries]
-	metaInbox     actor.Mailbox[[]types.MetaSeries]
-	maxSizeBytes  int
-	flushDuration time.Duration
-	queue         types.FileStorage
-	group         *types.SeriesGroup
-	lastFlush     time.Time
-	bytesInGroup  uint32
-	logger        log.Logger
-	self          actor.Actor
+	inbox          actor.Mailbox[[]*types.TimeSeries]
+	metaInbox      actor.Mailbox[[]*types.MetaSeries]
+	maxSizeBytes   int
+	flushDuration  time.Duration
+	queue          types.FileStorage
+	group          *types.SeriesGroup
+	lastFlush      time.Time
+	bytesInGroup   uint32
+	logger         log.Logger
+	self           actor.Actor
+	flushTestTimer *time.Ticker
 }
 
 func NewSerializer(maxSizeBytes int, flushDuration time.Duration, q types.FileStorage, l log.Logger) (types.Serializer, error) {
@@ -31,12 +32,13 @@ func NewSerializer(maxSizeBytes int, flushDuration time.Duration, q types.FileSt
 		flushDuration: flushDuration,
 		queue:         q,
 		group: &types.SeriesGroup{
-			Series:   make([]types.TimeSeries, 0),
-			Metadata: make([]types.MetaSeries, 0),
+			Series:   make([]*types.TimeSeries, 0),
+			Metadata: make([]*types.MetaSeries, 0),
 		},
-		logger:    l,
-		inbox:     actor.NewMailbox[[]types.TimeSeries](),
-		metaInbox: actor.NewMailbox[[]types.MetaSeries](),
+		logger:         l,
+		inbox:          actor.NewMailbox[[]*types.TimeSeries](),
+		metaInbox:      actor.NewMailbox[[]*types.MetaSeries](),
+		flushTestTimer: time.NewTicker(1 * time.Second),
 	}
 
 	return s, nil
@@ -53,24 +55,14 @@ func (s *Serializer) Stop() {
 	s.self.Stop()
 }
 
-func (s *Serializer) SendSeries(ctx context.Context, data []types.TimeSeries) error {
+func (s *Serializer) SendSeries(ctx context.Context, data []*types.TimeSeries) error {
 	return s.inbox.Send(ctx, data)
 }
 
-func (s *Serializer) SendMetadata(ctx context.Context, data []types.MetaSeries) error {
+func (s *Serializer) SendMetadata(ctx context.Context, data []*types.MetaSeries) error {
 	return s.metaInbox.Send(ctx, data)
 }
-
-func (s *Serializer) Mailbox() actor.MailboxSender[[]types.TimeSeries] {
-	return s.inbox
-}
-
-func (s *Serializer) MetaMailbox() actor.MailboxSender[[]types.MetaSeries] {
-	return s.metaInbox
-}
-
 func (s *Serializer) DoWork(ctx actor.Context) actor.WorkerStatus {
-
 	select {
 	case <-ctx.Done():
 		return actor.WorkerEnd
@@ -78,6 +70,7 @@ func (s *Serializer) DoWork(ctx actor.Context) actor.WorkerStatus {
 		if !ok {
 			return actor.WorkerEnd
 		}
+		level.Debug(s.logger).Log("msg", "received item", "len", len(item))
 		s.Append(ctx, item)
 		return actor.WorkerContinue
 	case item, ok := <-s.metaInbox.ReceiveC():
@@ -86,10 +79,15 @@ func (s *Serializer) DoWork(ctx actor.Context) actor.WorkerStatus {
 		}
 		s.AppendMetadata(ctx, item)
 		return actor.WorkerContinue
+	case <-s.flushTestTimer.C:
+		if time.Since(s.lastFlush) > s.flushDuration {
+			s.store(ctx)
+		}
+		return actor.WorkerContinue
 	}
 }
 
-func (s *Serializer) AppendMetadata(ctx actor.Context, data []types.MetaSeries) error {
+func (s *Serializer) AppendMetadata(ctx actor.Context, data []*types.MetaSeries) error {
 	if len(data) == 0 {
 		return nil
 	}
@@ -108,7 +106,7 @@ func (s *Serializer) AppendMetadata(ctx actor.Context, data []types.MetaSeries) 
 	return nil
 }
 
-func (s *Serializer) Append(ctx actor.Context, data []types.TimeSeries) error {
+func (s *Serializer) Append(ctx actor.Context, data []*types.TimeSeries) error {
 	if len(data) == 0 {
 		return nil
 	}
@@ -122,6 +120,7 @@ func (s *Serializer) Append(ctx actor.Context, data []types.TimeSeries) error {
 		level.Debug(s.logger).Log("flushing to disk due to maxSizeBytes", s.maxSizeBytes)
 		return s.store(ctx)
 	} else if time.Since(s.lastFlush) > s.flushDuration {
+		level.Debug(s.logger).Log("flushing to disk due to flush timer", s.maxSizeBytes)
 		return s.store(ctx)
 	}
 	return nil
@@ -135,8 +134,17 @@ var version = map[string]string{
 
 func (s *Serializer) store(ctx actor.Context) error {
 	s.lastFlush = time.Now()
+	if len(s.group.Series) == 0 {
+		return nil
+	}
 
+	defer func() {
+		for _, ts := range s.group.Series {
+			types.PutTimeSeries(ts)
+		}
+	}()
 	buffer, err := cbor.Marshal(s.group)
+
 	// We can reset the group now.
 	s.group.Series = s.group.Series[:0]
 	s.group.Metadata = s.group.Metadata[:0]

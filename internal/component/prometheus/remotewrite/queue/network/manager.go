@@ -2,7 +2,7 @@ package network
 
 import (
 	"context"
-	"github.com/fxamacker/cbor/v2"
+	"github.com/grafana/alloy/internal/runtime/logging/level"
 
 	"github.com/go-kit/log"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
@@ -62,16 +62,16 @@ func (s *manager) Start() {
 	s.self.Start()
 }
 
-func (s *manager) SendSeries(ctx context.Context, hash uint64, data []byte) error {
+func (s *manager) SendSeries(ctx context.Context, hash uint64, data *types.TimeSeries) error {
 	return s.inbox.Send(ctx, types.NetworkQueueItem{
-		Hash:   hash,
-		Buffer: data,
+		Hash: hash,
+		TS:   data,
 	})
 }
 
-func (s *manager) SendMetadata(ctx context.Context, data []byte) error {
+func (s *manager) SendMetadata(ctx context.Context, data *types.MetaSeries) error {
 	return s.metaInbox.Send(ctx, types.NetworkMetadataItem{
-		Buffer: data,
+		TS: data,
 	})
 }
 
@@ -84,9 +84,7 @@ func (s *manager) DoWork(ctx actor.Context) actor.WorkerStatus {
 		if !ok {
 			return actor.WorkerEnd
 		}
-		ts := &types.TimeSeries{}
-		cbor.Unmarshal(item.Buffer, ts)
-		s.Queue(ctx, item.Hash, *ts)
+		s.Queue(ctx, item.Hash, item.TS)
 		return actor.WorkerContinue
 	case _, ok := <-s.metaInbox.ReceiveC():
 		if !ok {
@@ -123,6 +121,7 @@ func (s *manager) updateConfig(cc ConnectionConfig) {
 }
 
 func (s *manager) Stop() {
+	level.Debug(s.logger).Log("msg", "stopping manager")
 	for _, l := range s.loops {
 		l.Stop()
 		l.stopCalled.Store(true)
@@ -132,13 +131,13 @@ func (s *manager) Stop() {
 }
 
 // Queue adds anything thats not metadata to the queue.
-func (s *manager) Queue(ctx context.Context, hash uint64, d types.TimeSeries) {
+func (s *manager) Queue(ctx context.Context, hash uint64, d *types.TimeSeries) {
 	// Based on a hash which is the label hash add to the queue.
 	queueNum := hash % s.connectionCount
 	s.loops[queueNum].seriesMbx.Send(ctx, d)
 }
 
 // QueueMetadata adds metadata to the queue.
-func (s *manager) QueueMetadata(ctx context.Context, d types.MetaSeries) {
+func (s *manager) QueueMetadata(ctx context.Context, d *types.MetaSeries) {
 	s.metadata.metaSeriesMbx.Send(ctx, d)
 }

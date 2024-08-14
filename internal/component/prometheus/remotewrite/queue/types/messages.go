@@ -8,12 +8,12 @@ type QueueItem struct {
 }
 
 type NetworkQueueItem struct {
-	Hash   uint64
-	Buffer []byte
+	Hash uint64
+	TS   *TimeSeries
 }
 
 type NetworkMetadataItem struct {
-	Buffer []byte
+	TS *MetaSeries
 }
 
 type Data struct {

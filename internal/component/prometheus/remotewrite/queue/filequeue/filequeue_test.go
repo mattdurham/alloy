@@ -2,13 +2,14 @@ package filequeue
 
 import (
 	"context"
-	"github.com/vladopajic/go-actor/actor"
-	"go.uber.org/goleak"
 	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/vladopajic/go-actor/actor"
+	"go.uber.org/goleak"
 
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 
@@ -110,6 +111,7 @@ func TestCorruption(t *testing.T) {
 	require.Error(t, err)
 
 	meta, buf, err := getHandle(t, mbx)
+	require.NoError(t, err)
 	require.True(t, string(buf) == "second")
 	require.Len(t, meta, 1)
 }
@@ -176,6 +178,7 @@ func TestOtherFiles(t *testing.T) {
 	require.NoError(t, err)
 
 	err = q.Send(context.Background(), nil, []byte("first"))
+	require.NoError(t, err)
 	os.Create(filepath.Join(dir, "otherfile"))
 	_, buf, err := getHandle(t, mbx)
 	require.NoError(t, err)
@@ -217,6 +220,7 @@ func TestResuming(t *testing.T) {
 	defer q2.Stop()
 	err = q2.Send(context.Background(), nil, []byte("third"))
 
+	require.NoError(t, err)
 	_, buf, err := getHandle(t, mbx2)
 	require.NoError(t, err)
 	require.True(t, string(buf) == "first")
@@ -240,7 +244,7 @@ func getHandle(t *testing.T, mbx actor.MailboxReceiver[types.DataHandle]) (map[s
 		return nil, nil, nil
 	case item, ok := <-mbx.ReceiveC():
 		require.True(t, ok)
-		return item.Get(item.Name)
+		return item.Get()
 	}
 
 }

@@ -17,8 +17,8 @@ import (
 type appender struct {
 	ttl       time.Duration
 	s         types.Serializer
-	data      []types.TimeSeries
-	metadata  []types.MetaSeries
+	data      []*types.TimeSeries
+	metadata  []*types.MetaSeries
 	logger    log.Logger
 	batchSize int
 	stats     func(s types.FileQueueStats)
@@ -35,8 +35,8 @@ func NewAppender(ttl time.Duration, s types.Serializer, batchSize int, stats fun
 	app := &appender{
 		ttl:       ttl,
 		s:         s,
-		data:      make([]types.TimeSeries, 0),
-		metadata:  make([]types.MetaSeries, 0),
+		data:      make([]*types.TimeSeries, 0),
+		metadata:  make([]*types.MetaSeries, 0),
 		logger:    logger,
 		batchSize: batchSize,
 		stats:     stats,
@@ -51,12 +51,15 @@ func (a *appender) Append(ref storage.SeriesRef, l labels.Labels, t int64, v flo
 	if t < endTime {
 		return ref, nil
 	}
+
 	hash := l.Hash()
-	a.data = append(a.data, types.TimeSeries{
-		Hash:   hash,
-		TS:     t,
-		Labels: l,
-	})
+	ts := types.GetTimeSeries()
+	ts.TS = t
+	ts.Hash = hash
+	ts.AddLabels(l)
+	ts.Value = v
+	a.data = append(a.data, ts)
+
 	// Finally if we have enough data in the batch then send it to the serializer.
 	// Originally we fed it each entry but there was some mutex overhead in highly concurrent scraping
 	// Batching solved that problem, a batch size of 100 is enough.
@@ -98,11 +101,11 @@ func (a *appender) AppendExemplar(ref storage.SeriesRef, l labels.Labels, e exem
 	ex.Value = e.Value
 	ex.Timestamp = e.Ts
 	hash := l.Hash()
-	a.data = append(a.data, types.TimeSeries{
-		Hash:   hash,
-		TS:     ex.Timestamp,
-		Labels: l,
-	})
+	ts := types.GetTimeSeries()
+	ts.Hash = hash
+	ts.TS = ex.Timestamp
+	ts.AddLabels(l)
+	a.data = append(a.data, ts)
 	return ref, nil
 }
 
@@ -112,27 +115,22 @@ func (a *appender) AppendHistogram(ref storage.SeriesRef, l labels.Labels, t int
 	if t < endTime {
 		return ref, nil
 	}
-	/*
-		if h != nil {
-			a.ts.Histograms = append(a.ts.Histograms, remote.HistogramToHistogramProto(t, h))
-		} else {
-			a.ts.Histograms = append(a.ts.Histograms, remote.FloatHistogramToHistogramProto(t, fh))
-		}
-		data, err := a.ts.Marshal()
-		if err != nil {
-			return ref, err
-		}
-		hash := l.Hash()
-		a.data = append(a.data, types.Raw{
-			Hash:  hash,
-			TS:    t,
-			Bytes: data,
-		})
-		a.stats(types.FileQueueStats{
-			SeriesStored:    1,
-			NewestTimestamp: t,
-		})
-		a.resetTS()*/
+	ts := types.GetTimeSeries()
+
+	if h != nil {
+		ts.FromHistogram(t, h)
+	} else {
+		ts.FromFlotHistogram(t, fh)
+	}
+	ts.AddLabels(l)
+	ts.Hash = l.Hash()
+	ts.TS = t
+
+	a.data = append(a.data, ts)
+	a.stats(types.FileQueueStats{
+		SeriesStored:    1,
+		NewestTimestamp: t,
+	})
 	return ref, nil
 }
 

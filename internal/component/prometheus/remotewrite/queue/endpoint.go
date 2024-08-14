@@ -71,12 +71,14 @@ func (ep *endpoint) DoWork(ctx actor.Context) actor.WorkerStatus {
 }
 
 func (ep *endpoint) handleItem(buf []byte) {
+	level.Debug(ep.log).Log("msg", "handling buffer", "size", len(buf))
 	var err error
 	ep.buf, err = snappy.Decode(buf)
 	if err != nil {
 		level.Debug(ep.log).Log("msg", "error snappy decoding", "err", err)
 		return
 	}
+	level.Debug(ep.log).Log("msg", "deserializing buffer")
 	sg, err := types.DeserializeToSeriesGroup(ep.buf)
 	if err != nil {
 		level.Debug(ep.log).Log("msg", "error deserializing", "err", err)
@@ -98,7 +100,7 @@ func (ep *endpoint) handleItem(buf []byte) {
 
 	}
 	for _, md := range sg.Metadata {
-		sendErr := ep.client.SendMetadata(context.Background(), md.Bytes)
+		sendErr := ep.client.SendMetadata(context.Background(), md)
 		if sendErr != nil {
 			level.Error(ep.log).Log("msg", "error sending metadata to write client", "err", sendErr)
 		}

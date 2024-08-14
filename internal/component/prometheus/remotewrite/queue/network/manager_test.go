@@ -218,10 +218,8 @@ func TestNonRecoverable(t *testing.T) {
 
 func send(t *testing.T, wr types.NetworkClient, ctx context.Context) {
 	ts := createSeries(t)
-	tsBuf, err := ts.Marshal()
-	require.NoError(t, err)
 	// The actual hash is only used for queueing into different buckets.
-	err = wr.SendSeries(ctx, rand.Uint64(), tsBuf)
+	err := wr.SendSeries(ctx, rand.Uint64(), ts)
 	require.NoError(t, err)
 }
 
@@ -241,15 +239,11 @@ func handler(t *testing.T, code int, callback func(wr *prompb.WriteRequest)) htt
 	})
 }
 
-func createSeries(_ *testing.T) prompb.TimeSeries {
-	ts := prompb.TimeSeries{
-		Samples: []prompb.Sample{
-			{
-				Timestamp: time.Now().Unix(),
-				Value:     1,
-			},
-		},
-		Labels: []prompb.Label{
+func createSeries(_ *testing.T) *types.TimeSeries {
+	ts := &types.TimeSeries{
+		TS:    time.Now().Unix(),
+		Value: 1,
+		Labels: []types.Label{
 			{
 				Name:  "__name__",
 				Value: randSeq(10),

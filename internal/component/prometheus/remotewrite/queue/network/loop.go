@@ -26,8 +26,8 @@ var _ actor.Worker = (*loop)(nil)
 // TODO @mattdurham think about if we need to split loop into metadata loop
 type loop struct {
 	configMbx      actor.Mailbox[ConnectionConfig]
-	seriesMbx      actor.Mailbox[types.TimeSeries]
-	metaSeriesMbx  actor.Mailbox[types.MetaSeries]
+	seriesMbx      actor.Mailbox[*types.TimeSeries]
+	metaSeriesMbx  actor.Mailbox[*types.MetaSeries]
 	client         *http.Client
 	batchCount     int
 	flushTimer     time.Duration
@@ -41,16 +41,16 @@ type loop struct {
 	stopCh         chan struct{}
 	stopCalled     atomic.Bool
 	externalLabels map[string]string
-	series         []types.TimeSeries
+	series         []*types.TimeSeries
 	self           actor.Actor
 	ticker         *time.Ticker
 }
 
 func newLoop(cc ConnectionConfig, log log.Logger, series func(s types.NetworkStats)) *loop {
 	return &loop{
-		seriesMbx:      actor.NewMailbox[types.TimeSeries](actor.OptCapacity(2 * cc.BatchCount)),
+		seriesMbx:      actor.NewMailbox[*types.TimeSeries](actor.OptCapacity(2 * cc.BatchCount)),
 		configMbx:      actor.NewMailbox[ConnectionConfig](),
-		metaSeriesMbx:  actor.NewMailbox[types.MetaSeries](),
+		metaSeriesMbx:  actor.NewMailbox[*types.MetaSeries](),
 		batchCount:     cc.BatchCount,
 		flushTimer:     cc.FlushDuration,
 		client:         &http.Client{},
@@ -130,7 +130,7 @@ func (l *loop) DoWork(ctx actor.Context) actor.WorkerStatus {
 }
 
 // trySend is the core functionality for sending data to a endpoint. It will attempt retries as defined in MaxRetryBackoffAttempts.
-func (l *loop) trySend(series []types.TimeSeries) {
+func (l *loop) trySend(series []*types.TimeSeries) {
 	attempts := 0
 attempt:
 	level.Debug(l.log).Log("msg", "sending data", "attempts", attempts, "len", len(series))
@@ -175,9 +175,10 @@ func (l *loop) finishSending() {
 	l.lastSend = time.Now()
 }
 
-func (l *loop) send(series []types.TimeSeries, retryCount int) sendResult {
+func (l *loop) send(series []*types.TimeSeries, retryCount int) sendResult {
 	result := sendResult{}
 	l.pbuf.Reset()
+	// TODO @mattdurham move this code into its own function.
 	if cap(l.seriesBuf) < len(l.series) {
 		l.seriesBuf = make([]prompb.TimeSeries, len(l.series), len(l.series))
 	}
@@ -187,11 +188,21 @@ func (l *loop) send(series []types.TimeSeries, retryCount int) sendResult {
 			l.seriesBuf[i].Labels = make([]prompb.Label, len(tsBuf.Labels), len(tsBuf.Labels))
 		}
 		l.seriesBuf[i].Labels = l.seriesBuf[i].Labels[:len(tsBuf.Labels)]
-		//l.seriesBuf[i].Histograms = l.seriesBuf[i].Histograms[:len(tsBuf.Labels)]
+		if tsBuf.Histogram != nil {
+			if cap(l.seriesBuf[i].Histograms) < 1 {
+				l.seriesBuf[i].Histograms = make([]prompb.Histogram, 1)
+			}
+			l.seriesBuf[i].Histograms[0] = tsBuf.Histogram.ToPromHistogram()
+		} else {
+			l.seriesBuf[i].Histograms = l.seriesBuf[i].Histograms[:0]
+		}
+
 		if cap(l.seriesBuf[i].Samples) < 1 {
 			l.seriesBuf[i].Samples = make([]prompb.Sample, 1)
 		}
 		l.seriesBuf[i].Samples = l.seriesBuf[i].Samples[:1]
+		l.seriesBuf[i].Samples[0].Value = tsBuf.Value
+		l.seriesBuf[i].Samples[0].Timestamp = tsBuf.TS
 		for k, v := range tsBuf.Labels {
 			l.seriesBuf[i].Labels[k].Name = v.Name
 			l.seriesBuf[i].Labels[k].Value = v.Value

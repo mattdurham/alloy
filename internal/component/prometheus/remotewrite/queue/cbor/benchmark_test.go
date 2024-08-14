@@ -46,10 +46,6 @@ var tests = []test{
 		name:        "1_000_000",
 		metricCount: 1_000_000,
 	},
-	/*{
-		name:        "10_000_000",
-		metricCount: 10_000_000,
-	},*/
 }
 
 func BenchmarkSimpleCbor(b *testing.B) {
@@ -63,7 +59,7 @@ func BenchmarkSimpleCbor(b *testing.B) {
 				runtime.ReadMemStats(&m1)
 				q := &fq{}
 				l := log2.NewNopLogger()
-				wr, err := NewSerializer(32*1024*1024, 500*time.Millisecond, q, l)
+				wr, err := NewSerializer(16*1024*1024, 500*time.Millisecond, q, l)
 				wr.Start()
 				b.Cleanup(func() {
 					wr.Stop()

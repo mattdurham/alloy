@@ -3,17 +3,17 @@ package network
 import (
 	"context"
 	"fmt"
-	"github.com/go-kit/log"
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/go-kit/log"
+	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 )
 
 func BenchmarkLoopAllocs(b *testing.B) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		return
 	}))
 	logger := log.NewNopLogger()
 
@@ -24,7 +24,7 @@ func BenchmarkLoopAllocs(b *testing.B) {
 			Value: fmt.Sprintf("value_%d", i),
 		})
 	}
-	ts := types.TimeSeries{
+	ts := &types.TimeSeries{
 		Labels: lbls,
 		TS:     time.Now().Unix(),
 		Value:  1,
