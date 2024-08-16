@@ -142,8 +142,6 @@ func (s *Serializer) store(ctx actor.Context) error {
 
 	strMapToInt := make(map[string]int32)
 	index := int32(0)
-	//Deduplicate our strings.
-
 	defer func() {
 		types.PutTimeSeriesBinarySliceValue(group.Series)
 	}()
@@ -194,7 +192,7 @@ func (s *Serializer) store(ctx actor.Context) error {
 	}
 
 	group.Strings = stringsSlice
-	buf, err := group.MarshalBebop(nil)
+	buf, err := group.MarshalMsg(nil)
 	if err != nil {
 		return err
 	}

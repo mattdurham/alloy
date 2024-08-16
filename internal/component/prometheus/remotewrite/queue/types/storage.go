@@ -85,6 +85,6 @@ func BinaryToTimeSeries(bin *TimeSeriesBinary, items []string) *TimeSeries {
 }
 
 func DeserializeToSeriesGroup(sg *SeriesGroup, buf []byte) (*SeriesGroup, error) {
-	_, err := sg.UnmarshalBebop(buf)
+	buf, err := sg.UnmarshalMsg(buf)
 	return sg, err
 }

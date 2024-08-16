@@ -24,6 +24,7 @@ type endpoint struct {
 	mbx        actor.Mailbox[types.DataHandle]
 	buf        []byte
 	self       actor.Actor
+	sg         *types.SeriesGroup
 }
 
 func NewEndpoint(client types.NetworkClient, serializer types.Serializer, stats, metatStats *types.PrometheusStats, ttl time.Duration, logger log.Logger) *endpoint {
@@ -36,6 +37,7 @@ func NewEndpoint(client types.NetworkClient, serializer types.Serializer, stats,
 		ttl:        ttl,
 		mbx:        actor.NewMailbox[types.DataHandle](),
 		buf:        make([]byte, 0, 1024),
+		sg:         &types.SeriesGroup{},
 	}
 }
 
@@ -71,20 +73,13 @@ func (ep *endpoint) DoWork(ctx actor.Context) actor.WorkerStatus {
 }
 
 func (ep *endpoint) handleItem(meta map[string]string, buf []byte) {
-	level.Debug(ep.log).Log("msg", "handling buffer", "size", len(buf))
 	var err error
 	ep.buf, err = snappy.Decode(buf)
 	if err != nil {
 		level.Debug(ep.log).Log("msg", "error snappy decoding", "err", err)
 		return
 	}
-	level.Debug(ep.log).Log("msg", "deserializing buffer")
-	// This looks odd, why not add it as a field on ep, or a sync.pool.
-	// Because this things CHURNs through allocs. And by keeping entirely inside this function
-	// we save an incredible amount of GC time.
-	// If this ever bounces to the heap then CPU doubles.
-	sg := &types.SeriesGroup{}
-	sg, err = types.DeserializeToSeriesGroup(sg, ep.buf)
+	sg, err := types.DeserializeToSeriesGroup(ep.sg, ep.buf)
 	if err != nil {
 		level.Debug(ep.log).Log("msg", "error deserializing", "err", err)
 		return

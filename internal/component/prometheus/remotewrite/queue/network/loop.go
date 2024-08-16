@@ -186,7 +186,7 @@ func (l *loop) send(series []*types.TimeSeries, retryCount int, data []byte) sen
 	var buf []byte
 	// Check to see if this is a retry and we can reuse the buffer.
 	if len(data) == 0 {
-		data, err = createWriteRequest(series, l.externalLabels, data)
+		data, err = createWriteRequest(l.req, series, l.externalLabels, data)
 		if err != nil {
 			result.err = err
 			return result
@@ -271,10 +271,11 @@ var tsPool = sync.Pool{New: func() any {
 	return &prompb.TimeSeries{}
 }}
 
-func createWriteRequest(series []*types.TimeSeries, externalLabels map[string]string, data []byte) ([]byte, error) {
-	wr := &prompb.WriteRequest{
-		Timeseries: make([]prompb.TimeSeries, len(series)),
+func createWriteRequest(wr *prompb.WriteRequest, series []*types.TimeSeries, externalLabels map[string]string, data []byte) ([]byte, error) {
+	if cap(wr.Timeseries) < len(series) {
+		wr.Timeseries = make([]prompb.TimeSeries, len(series))
 	}
+	wr.Timeseries = wr.Timeseries[0:len(series)]
 	for i, tsBuf := range series {
 		ts := tsPool.Get().(*prompb.TimeSeries)
 		if cap(ts.Labels) < len(tsBuf.Labels) {
@@ -285,13 +286,19 @@ func createWriteRequest(series []*types.TimeSeries, externalLabels map[string]st
 			ts.Labels[k].Name = v.Name
 			ts.Labels[k].Value = v.Value
 		}
-		if tsBuf.Histogram != nil {
+		if cap(ts.Histograms) == 0 {
 			ts.Histograms = make([]prompb.Histogram, 1)
+		}
+		if tsBuf.Histogram != nil {
+			ts.Histograms = ts.Histograms[:1]
 			ts.Histograms[0] = tsBuf.Histogram.ToPromHistogram()
 		}
 		if tsBuf.FloatHistogram != nil {
-			ts.Histograms = make([]prompb.Histogram, 1)
+			ts.Histograms = ts.Histograms[:1]
 			ts.Histograms[0] = tsBuf.FloatHistogram.ToPromFloatHistogram()
+		}
+		if tsBuf.Histogram == nil && tsBuf.FloatHistogram == nil {
+			ts.Histograms = ts.Histograms[:0]
 		}
 		// Encode the external labels inside if needed.
 		for k, v := range externalLabels {
