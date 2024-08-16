@@ -2,7 +2,6 @@ package queue
 
 import (
 	"context"
-	"strconv"
 	"time"
 
 	snappy "github.com/eapache/go-xerial-snappy"
@@ -72,7 +71,6 @@ func (ep *endpoint) DoWork(ctx actor.Context) actor.WorkerStatus {
 }
 
 func (ep *endpoint) handleItem(meta map[string]string, buf []byte) {
-	itemCount, _ := strconv.Atoi(meta["series_count"])
 	level.Debug(ep.log).Log("msg", "handling buffer", "size", len(buf))
 	var err error
 	ep.buf, err = snappy.Decode(buf)
@@ -81,8 +79,11 @@ func (ep *endpoint) handleItem(meta map[string]string, buf []byte) {
 		return
 	}
 	level.Debug(ep.log).Log("msg", "deserializing buffer")
+	// This looks odd, why not add it as a field on ep, or a sync.pool.
+	// Because this things CHURNs through allocs. And by keeping entirely inside this function
+	// we save an incredible amount of GC time.
+	// If this ever bounces to the heap then CPU doubles.
 	sg := &types.SeriesGroup{}
-	sg.Series = types.GetTimeSeriesSlice(itemCount)
 	sg, err = types.DeserializeToSeriesGroup(sg, ep.buf)
 	if err != nil {
 		level.Debug(ep.log).Log("msg", "error deserializing", "err", err)
@@ -97,16 +98,16 @@ func (ep *endpoint) handleItem(meta map[string]string, buf []byte) {
 		if old > ep.ttl {
 			continue
 		}
-		sendErr := ep.network.SendSeries(context.Background(), series.Hash, series)
+		sendErr := ep.network.SendSeries(context.Background(), series.Hash, types.BinaryToTimeSeries(&series, sg.Strings))
 		if sendErr != nil {
 			level.Error(ep.log).Log("msg", "error sending to write client", "err", sendErr)
 		}
-
 	}
-	for _, md := range sg.Metadata {
-		sendErr := ep.network.SendMetadata(context.Background(), md)
-		if sendErr != nil {
-			level.Error(ep.log).Log("msg", "error sending metadata to write client", "err", sendErr)
-		}
-	}
+	/*
+		for _, md := range sg.Metadata {
+			sendErr := ep.network.SendMetadata(context.Background(), md)
+			if sendErr != nil {
+				level.Error(ep.log).Log("msg", "error sending metadata to write client", "err", sendErr)
+			}
+		}*/
 }

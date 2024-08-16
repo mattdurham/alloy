@@ -717,8 +717,8 @@ require (
 
 require (
 	github.com/fxamacker/cbor/v2 v2.7.0
-	github.com/ortuman/nuke v1.3.0
 	github.com/vladopajic/go-actor v0.9.0
+	wellquite.org/bebop v0.0.0-20231113214845-2b238606656b
 )
 
 require (

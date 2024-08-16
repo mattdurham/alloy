@@ -68,7 +68,7 @@ func (a *appender) Append(ref storage.SeriesRef, l labels.Labels, t int64, v flo
 		if err != nil {
 			return ref, err
 		}
-		a.data = a.data[:0]
+		a.data = make([]*types.TimeSeries, 0)
 	}
 	a.stats(types.FileQueueStats{
 		SeriesStored:    1,

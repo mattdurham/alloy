@@ -1,0 +1,85 @@
+
+
+struct SeriesGroup  {
+	string[] Strings;
+	 TimeSeriesBinary[] Series ;
+	 MetaSeriesBinary[] Metadata;
+}
+
+message Histograms {
+    1 -> Histogram Histogram;
+    2 -> FloatHistogram FloatHistogram;
+}
+
+
+struct TimeSeriesBinary  {
+	int32[] LabelsNames;
+	int32[] LabelsValues;
+	int64 TS;
+	float64 Value;
+	uint64 Hash;
+	Histograms Histograms;
+}
+
+
+struct MetaSeriesBinary  {
+	int32[] LabelsNames;
+	int32[] LabelsValues;
+	int64 TS;
+	float64 Value;
+	uint64 Hash;
+	Histograms Histograms;
+}
+
+
+struct Histogram {
+	HistogramCount Count;
+	float64 Sum;
+	int32 Schema;
+	float64 ZeroThreshold;
+	HistogramZeroCount ZeroCount;
+	 BucketSpan[]       NegativeSpans      ;
+	 int64[]  NegativeBuckets               ;
+	 float64[]       NegativeCounts        ;
+ BucketSpan[]  	PositiveSpans           ;
+ int64[] 	PositiveBuckets             ;
+ float64[]     	PositiveCounts        ;
+  int32 	ResetHint                  ;
+	int64 TimestampMillisecond          ;
+}
+
+struct FloatHistogram {
+    HistogramCount   Count;
+    float64	Sum;
+    int32	Schema;
+	float64 ZeroThreshold;
+	HistogramZeroCount ZeroCount;
+	BucketSpan[]       NegativeSpans;
+	int64[] NegativeDeltas;
+    float64[]	NegativeCounts;
+	BucketSpan[] PositiveSpans ;
+	int64[] PositiveDeltas      ;
+	float64[] PositiveCounts     ;
+	int32 ResetHint            ;
+	int64 TimestampMillisecond ;
+}
+
+
+struct HistogramCount  {
+	bool IsInt;
+	uint64 IntValue;
+	float64 FloatValue;
+}
+
+
+
+struct HistogramZeroCount  {
+	 bool IsInt;
+	 uint64 IntValue;
+	 float64 FloatValue;
+}
+
+struct BucketSpan {
+	int32 Offset;
+	uint32 Length;
+}

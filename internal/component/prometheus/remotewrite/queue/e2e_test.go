@@ -38,12 +38,13 @@ func TestE2E(t *testing.T) {
 				require.NoError(t, errApp)
 			},
 			tester: func(samples []prompb.TimeSeries) {
+				t.Helper()
 				for _, s := range samples {
 					require.True(t, len(s.Samples) == 1)
 					require.True(t, s.Samples[0].Timestamp > 0)
 					require.True(t, s.Samples[0].Value > 0)
 					require.True(t, len(s.Labels) == 1)
-					require.True(t, s.Labels[0].Name == fmt.Sprintf("name_%d", int(s.Samples[0].Value)))
+					require.Truef(t, s.Labels[0].Name == fmt.Sprintf("name_%d", int(s.Samples[0].Value)), "%d name %s", int(s.Samples[0].Value), s.Labels[0].Name)
 					require.True(t, s.Labels[0].Value == fmt.Sprintf("value_%d", int(s.Samples[0].Value)))
 				}
 			},
@@ -56,6 +57,7 @@ func TestE2E(t *testing.T) {
 				require.NoError(t, errApp)
 			},
 			tester: func(samples []prompb.TimeSeries) {
+				t.Helper()
 				for _, s := range samples {
 					require.True(t, len(s.Samples) == 1)
 					require.True(t, s.Samples[0].Timestamp > 0)
@@ -73,6 +75,7 @@ func TestE2E(t *testing.T) {
 				require.NoError(t, errApp)
 			},
 			tester: func(samples []prompb.TimeSeries) {
+				t.Helper()
 				for _, s := range samples {
 					require.True(t, len(s.Samples) == 1)
 					require.True(t, s.Samples[0].Timestamp > 0)
@@ -138,6 +141,7 @@ func runTest(t *testing.T, add func(index int, appendable storage.Appender), tes
 	cancel()
 	test(samples)
 	require.True(t, types.OutStandingTimeSeries.Load() == 0)
+	require.True(t, types.OutStandingTimeSeriesBinary.Load() == 0)
 
 }
 

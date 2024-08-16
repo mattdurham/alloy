@@ -4,12 +4,10 @@ import (
 	"fmt"
 	"github.com/prometheus/prometheus/prompb"
 	"go.uber.org/atomic"
-	"math"
 	"reflect"
 	"sync"
 	"time"
 
-	"github.com/fxamacker/cbor/v2"
 	"github.com/grafana/alloy/syntax/alloytypes"
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
@@ -89,8 +87,9 @@ func (ts *TimeSeries) FromFlotHistogram(timestamp int64, h *histogram.FloatHisto
 func (ts *TimeSeries) AddLabels(lbls labels.Labels) {
 	if cap(ts.Labels) < len(lbls) {
 		ts.Labels = make([]Label, len(lbls))
+	} else {
+		ts.Labels = ts.Labels[:len(lbls)]
 	}
-	ts.Labels = ts.Labels[:len(lbls)]
 	for i, l := range lbls {
 		ts.Labels[i].Name = l.Name
 		ts.Labels[i].Value = l.Value
@@ -104,22 +103,6 @@ type TimeSeries struct {
 	Hash           uint64          `cbor:"4,keyasint"`
 	Histogram      *Histogram      `cbor:"5,keyasint"`
 	FloatHistogram *FloatHistogram `cbor:"6,keyasint"`
-}
-
-type Histogram struct {
-	Count                HistogramCount     `cbor:"1,keyasint"`
-	Sum                  float64            `cbor:"2,keyasint"`
-	Schema               int32              `cbor:"3,keyasint"`
-	ZeroThreshold        float64            `cbor:"4,keyasint"`
-	ZeroCount            HistogramZeroCount `cbor:"5,keyasint"`
-	NegativeSpans        []BucketSpan       `cbor:"6,keyasint"`
-	NegativeBuckets      []int64            `cbor:"7,keyasint"`
-	NegativeCounts       []float64          `cbor:"8,keyasint"`
-	PositiveSpans        []BucketSpan       `cbor:"9,keyasint"`
-	PositiveBuckets      []int64            `cbor:"10,keyasint"`
-	PositiveCounts       []float64          `cbor:"11,keyasint"`
-	ResetHint            int32              `cbor:"12,keyasint"`
-	TimestampMillisecond int64              `cbor:"13,keyasint"`
 }
 
 func (h Histogram) ToPromHistogram() prompb.Histogram {
@@ -140,22 +123,6 @@ func (h Histogram) ToPromHistogram() prompb.Histogram {
 	}
 }
 
-type FloatHistogram struct {
-	Count                HistogramCount     `cbor:"1,keyasint"`
-	Sum                  float64            `cbor:"2,keyasint"`
-	Schema               int32              `cbor:"3,keyasint"`
-	ZeroThreshold        float64            `cbor:"4,keyasint"`
-	ZeroCount            HistogramZeroCount `cbor:"5,keyasint"`
-	NegativeSpans        []BucketSpan       `cbor:"6,keyasint"`
-	NegativeDeltas       []int64            `cbor:"7,keyasint"`
-	NegativeCounts       []float64          `cbor:"8,keyasint"`
-	PositiveSpans        []BucketSpan       `cbor:"9,keyasint"`
-	PositiveDeltas       []int64            `cbor:"10,keyasint"`
-	PositiveCounts       []float64          `cbor:"11,keyasint"`
-	ResetHint            int32              `cbor:"12,keyasint"`
-	TimestampMillisecond int64              `cbor:"13,keyasint"`
-}
-
 func (h FloatHistogram) ToPromFloatHistogram() prompb.Histogram {
 	return prompb.Histogram{
 		Count:          &prompb.Histogram_CountFloat{CountFloat: h.Count.FloatValue},
@@ -172,23 +139,6 @@ func (h FloatHistogram) ToPromFloatHistogram() prompb.Histogram {
 		ResetHint:      prompb.Histogram_ResetHint(h.ResetHint),
 		Timestamp:      h.TimestampMillisecond,
 	}
-}
-
-type HistogramCount struct {
-	IsInt      bool    `cbor:"1,keyasint"`
-	IntValue   uint64  `cbor:"2,keyasint"`
-	FloatValue float64 `cbor:"3,keyasint"`
-}
-
-type HistogramZeroCount struct {
-	IsInt      bool    `cbor:"1,keyasint"`
-	IntValue   uint64  `cbor:"2,keyasint"`
-	FloatValue float64 `cbor:"3,keyasint"`
-}
-
-type BucketSpan struct {
-	Offset int32  `cbor:"1,keyasint"`
-	Length uint32 `cbor:"2,keyasint"`
 }
 
 func ToPromBucketSpans(bss []BucketSpan) []prompb.BucketSpan {
@@ -216,8 +166,8 @@ func FromPromSpan(spans []histogram.Span) []BucketSpan {
 }
 
 type Label struct {
-	Name  string `cbor:"1,keyasint"`
-	Value string `cbor:"2,keyasint"`
+	Name  string
+	Value string
 }
 
 func (ts TimeSeries) ByteLength() int {
@@ -231,24 +181,6 @@ func (ts TimeSeries) ByteLength() int {
 	return length
 }
 
-type SeriesGroup struct {
-	_        struct{}      `cbor:",toarray"`
-	Series   []*TimeSeries `cbor:"1,keyasint"`
-	Metadata []*MetaSeries `cbor:"2,keyasint"`
-}
-
-func DeserializeToSeriesGroup(sg *SeriesGroup, buf []byte) (*SeriesGroup, error) {
-	decOpt := cbor.DecOptions{
-		MaxArrayElements: math.MaxInt32,
-	}
-	dec, err := decOpt.DecMode()
-	if err != nil {
-		return nil, err
-	}
-	err = dec.Unmarshal(buf, sg)
-	return sg, err
-}
-
 type MetaSeries struct {
 	TimeSeries
 }
@@ -256,7 +188,7 @@ type MetaSeries struct {
 func defaultArgs() Arguments {
 	return Arguments{
 		TTL:               2 * time.Hour,
-		BatchSizeBytes:    32 * 1024 * 1024,
+		BatchSizeBytes:    16 * 1024 * 1024,
 		FlushDuration:     5 * time.Second,
 		AppenderBatchSize: 1_000,
 	}

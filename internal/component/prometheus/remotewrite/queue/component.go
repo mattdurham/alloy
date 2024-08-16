@@ -122,11 +122,8 @@ func (s *Queue) createEndpoints() error {
 
 		// Serializer is set after
 		end := NewEndpoint(client, nil, stats, meta, s.args.TTL, s.opts.Logger)
-		wg := sync.WaitGroup{}
 		// This wait group is to ensure we are started before we send on the mailbox.
-		wg.Add(1)
 		fq, err := filequeue.NewQueue(filepath.Join(s.opts.DataPath, ep.Name, "wal"), func(ctx context.Context, dh types.DataHandle) {
-			wg.Wait()
 			_ = end.mbx.Send(ctx, dh)
 		}, s.opts.Logger)
 		if err != nil {
@@ -139,7 +136,6 @@ func (s *Queue) createEndpoints() error {
 		end.serializer = serial
 		s.endpoints[ep.Name] = end
 		end.Start()
-		wg.Done()
 	}
 	return nil
 }

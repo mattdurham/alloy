@@ -25,17 +25,27 @@ type queue struct {
 	logger    log.Logger
 	inbox     actor.Mailbox[types.Data]
 	out       func(ctx context.Context, dh types.DataHandle)
+	ids       []string
 }
 
 func (q *queue) Start() {
 	q.self = actor.Combine(actor.New(q), q.inbox).Build()
 	q.self.Start()
+	// Queue up our existing items.
+	for _, name := range q.ids {
+		q.out(context.TODO(), types.DataHandle{
+			Name: name,
+			Get: func() (map[string]string, []byte, error) {
+				return get(name)
+			},
+		})
+	}
 }
 
 // Record wraps the input data and combines it with the metadata.
 type Record struct {
-	Meta map[string]string `cbor:"1,keyasint"`
-	Data []byte            `cbor:"2,keyasint"`
+	Meta map[string]string
+	Data []byte
 }
 
 // NewQueue returns a implementation of FileStorage.
@@ -66,17 +76,13 @@ func NewQueue(directory string, out func(ctx context.Context, dh types.DataHandl
 		logger:    logger,
 		out:       out,
 		inbox:     actor.NewMailbox[types.Data](),
+		ids:       make([]string, 0),
 	}
 
 	// Push the files that currently exist to the channel.
 	for _, id := range ids {
 		name := filepath.Join(directory, fmt.Sprintf("%d.committed", id))
-		q.out(context.TODO(), types.DataHandle{
-			Name: name,
-			Get: func() (map[string]string, []byte, error) {
-				return get(name)
-			},
-		})
+		q.ids = append(q.ids, name)
 	}
 	return q, nil
 }

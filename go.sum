@@ -1503,6 +1503,8 @@ github.com/mariomac/guara v0.0.0-20230621100729-42bd7716e524 h1:24nnoPrOI7cw2YZT
 github.com/mariomac/guara v0.0.0-20230621100729-42bd7716e524/go.mod h1:TMuTALUh4SPCDJdYOuOYIEwBgH2rzCDP1nNgj+lI8AE=
 github.com/mariomac/pipes v0.10.0 h1:2B8WreyTEC4MiThrGmAwLPxVkqPtvLm/aiVghAt2bUo=
 github.com/mariomac/pipes v0.10.0/go.mod h1:Htfq849Q5Vr1uF3XKMhURzuiV7AqL0k2OV2RLm6rPek=
+github.com/matryer/is v1.4.1 h1:55ehd8zaGABKLXQUe2awZ99BD/PTc2ls+KV/dXphgEQ=
+github.com/matryer/is v1.4.1/go.mod h1:8I/i5uYgLzgsgEloJE1U6xx5HkBQpAZvepWuujKwMRU=
 github.com/mattn/go-colorable v0.0.9/go.mod h1:9vuHe8Xs5qXnSaW/c/ABM9alt+Vo+STaOChaDxuIBZU=
 github.com/mattn/go-colorable v0.1.1/go.mod h1:FuOcm+DKB9mbwrcAfNl7/TZVBZ6rcnceauSikq3lYCQ=
 github.com/mattn/go-colorable v0.1.4/go.mod h1:U0ppj6V5qS13XJ6of8GYAs25YV2eR4EVcfRqFIhoBtE=
@@ -1839,8 +1841,6 @@ github.com/openzipkin/zipkin-go v0.2.2/go.mod h1:NaW6tEwdmWMaCDZzg8sh+IBNOxHMPnh
 github.com/openzipkin/zipkin-go v0.4.3 h1:9EGwpqkgnwdEIJ+Od7QVSEIH+ocmm5nPat0G7sjsSdg=
 github.com/openzipkin/zipkin-go v0.4.3/go.mod h1:M9wCJZFWCo2RiY+o1eBCEMe0Dp2S5LDHcMZmk3RmK7c=
 github.com/openzipkin/zipkin-go-opentracing v0.3.4/go.mod h1:js2AbwmHW0YD9DwIw2JhQWmbfFi/UnWyYwdVhqbCDOE=
-github.com/ortuman/nuke v1.3.0 h1:NBZjV6gv4bOuND0n5gC2jcQgEWKGVyv43X9Bi/2ioXI=
-github.com/ortuman/nuke v1.3.0/go.mod h1:muDIne2xoAwuwHtAJ05/YSlKeCT5+XgFCwBju5ueoAQ=
 github.com/ory/dockertest v3.3.4+incompatible/go.mod h1:1vX4m9wsvi00u5bseYwXaSnhNrne+V0E6LAcBILJdPs=
 github.com/ory/dockertest/v3 v3.8.1 h1:vU/8d1We4qIad2YM0kOwRVtnyue7ExvacPiw1yDm17g=
 github.com/ory/dockertest/v3 v3.8.1/go.mod h1:wSRQ3wmkz+uSARYMk7kVJFDBGm8x5gSxIhI7NDc+BAQ=
@@ -3210,3 +3210,5 @@ sigs.k8s.io/yaml v1.2.0/go.mod h1:yfXDCHCao9+ENCvLSE62v9VSji2MKu5jeNfTrofGhJc=
 sigs.k8s.io/yaml v1.4.0 h1:Mk1wCc2gy/F0THH0TAp1QYyJNzRm2KCLy3o5ASXVI5E=
 sigs.k8s.io/yaml v1.4.0/go.mod h1:Ejl7/uTz7PSA4eKMyQCUTnhZYNmLIl+5c2lQPGR2BPY=
 sourcegraph.com/sourcegraph/appdash v0.0.0-20190731080439-ebfcffb1b5c0/go.mod h1:hI742Nqp5OhwiqlzhgfbWU4mW4yO10fP+LoT9WOswdU=
+wellquite.org/bebop v0.0.0-20231113214845-2b238606656b h1:UckmWRSFP7RO8fqTm5ax2rK6t2P24VaDQFht4Zi/ack=
+wellquite.org/bebop v0.0.0-20231113214845-2b238606656b/go.mod h1:Q/g7VwYAUv9QrjR2BIxSA25YarXMDGDPa8lrLAJx9UI=

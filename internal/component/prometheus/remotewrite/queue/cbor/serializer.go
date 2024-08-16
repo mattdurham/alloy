@@ -6,7 +6,6 @@ import (
 	"time"
 
 	snappy "github.com/eapache/go-xerial-snappy"
-	"github.com/fxamacker/cbor/v2"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
@@ -19,23 +18,22 @@ type Serializer struct {
 	maxSizeBytes   int
 	flushDuration  time.Duration
 	queue          types.FileStorage
-	group          *types.SeriesGroup
 	lastFlush      time.Time
 	bytesInGroup   uint32
 	logger         log.Logger
 	self           actor.Actor
 	flushTestTimer *time.Ticker
+	series         []*types.TimeSeries
+	meta           []*types.MetaSeries
+	stringList     []string
 }
 
 func NewSerializer(maxSizeBytes int, flushDuration time.Duration, q types.FileStorage, l log.Logger) (types.Serializer, error) {
 	s := &Serializer{
-		maxSizeBytes:  maxSizeBytes,
-		flushDuration: flushDuration,
-		queue:         q,
-		group: &types.SeriesGroup{
-			Series:   make([]*types.TimeSeries, 0),
-			Metadata: make([]*types.MetaSeries, 0),
-		},
+		maxSizeBytes:   maxSizeBytes,
+		flushDuration:  flushDuration,
+		queue:          q,
+		series:         make([]*types.TimeSeries, 0),
 		logger:         l,
 		inbox:          actor.NewMailbox[[]*types.TimeSeries](),
 		metaInbox:      actor.NewMailbox[[]*types.MetaSeries](),
@@ -94,7 +92,7 @@ func (s *Serializer) AppendMetadata(ctx actor.Context, data []*types.MetaSeries)
 	}
 
 	for _, d := range data {
-		s.group.Metadata = append(s.group.Metadata, d)
+		s.meta = append(s.meta, d)
 		s.bytesInGroup = s.bytesInGroup + uint32(d.ByteLength()) + 4
 	}
 	// If we would go over the max size then send, or if we have hit the flush duration then send.
@@ -113,7 +111,7 @@ func (s *Serializer) Append(ctx actor.Context, data []*types.TimeSeries) error {
 	}
 
 	for _, d := range data {
-		s.group.Series = append(s.group.Series, d)
+		s.series = append(s.series, d)
 		s.bytesInGroup = s.bytesInGroup + uint32(d.ByteLength()) + 4
 	}
 	// If we would go over the max size then send, or if we have hit the flush duration then send.
@@ -129,29 +127,85 @@ func (s *Serializer) Append(ctx actor.Context, data []*types.TimeSeries) error {
 
 func (s *Serializer) store(ctx actor.Context) error {
 	s.lastFlush = time.Now()
-	if len(s.group.Series) == 0 {
+	if len(s.series) == 0 && len(s.meta) == 0 {
 		return nil
 	}
+	s.stringList = s.stringList[:0]
+	group := &types.SeriesGroup{
+		Series:   make([]types.TimeSeriesBinary, len(s.series)),
+		Metadata: make([]types.MetaSeriesBinary, len(s.meta)),
+	}
+	defer func() {
+		types.PutTimeSeriesSlice(s.series)
+		s.series = make([]*types.TimeSeries, 0)
+	}()
+
+	strMapToInt := make(map[string]int32)
+	index := int32(0)
+	//Deduplicate our strings.
 
 	defer func() {
-		for _, ts := range s.group.Series {
-			types.PutTimeSeries(ts)
-		}
-		// We can reset the group now.
-		s.group.Series = s.group.Series[:0]
-		s.group.Metadata = s.group.Metadata[:0]
+		types.PutTimeSeriesBinarySliceValue(group.Series)
 	}()
-	buffer, err := cbor.Marshal(s.group)
+
+	for si, ser := range s.series {
+		// You may ask why we arent using a pool? Because since this is only used in the function
+		// it stays in the stack and not the heap. Which means GC doesnt kick in.
+		ts := types.GetTimeSeriesBinary()
+		if cap(ts.LabelsNames) < len(ser.Labels) {
+			ts.LabelsNames = make([]int32, len(ser.Labels))
+		} else {
+			ts.LabelsNames = ts.LabelsNames[:len(ser.Labels)]
+		}
+		if cap(ts.LabelsValues) < len(ser.Labels) {
+			ts.LabelsValues = make([]int32, len(ser.Labels))
+		} else {
+			ts.LabelsValues = ts.LabelsValues[:len(ser.Labels)]
+		}
+		ts.TS = ser.TS
+		ts.Value = ser.Value
+		ts.Hash = ser.Hash
+
+		ts.Histograms.Histogram = ser.Histogram
+		ts.Histograms.FloatHistogram = ser.FloatHistogram
+
+		for i, v := range ser.Labels {
+			val, found := strMapToInt[v.Name]
+			if !found {
+				strMapToInt[v.Name] = index
+				val = index
+				index++
+			}
+			ts.LabelsNames[i] = val
+
+			val, found = strMapToInt[v.Value]
+			if !found {
+				strMapToInt[v.Value] = index
+				val = index
+				index++
+			}
+			ts.LabelsValues[i] = val
+		}
+		group.Series[si] = *ts
+	}
+	stringsSlice := make([]string, len(strMapToInt))
+	for k, v := range strMapToInt {
+		stringsSlice[v] = k
+	}
+
+	group.Strings = stringsSlice
+	buf, err := group.MarshalBebop(nil)
 	if err != nil {
-		// Something went wrong with serializing the whole group so lets drop it.
 		return err
 	}
-	out := snappy.Encode(buffer)
+
+	out := snappy.Encode(buf)
 	meta := map[string]string{
 		// product.signal_type.schema.version
 		"version":      "alloy.metrics.simple.v1",
 		"encoding":     "snappy",
-		"series_count": strconv.Itoa(len(s.group.Series)),
+		"series_count": strconv.Itoa(len(group.Series)),
+		"meta_count":   strconv.Itoa(len(group.Metadata)),
 	}
 	err = s.queue.Send(ctx, meta, out)
 	s.bytesInGroup = 0

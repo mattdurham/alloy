@@ -8,11 +8,11 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 	"github.com/prometheus/prometheus/prompb"
@@ -33,10 +33,7 @@ type loop struct {
 	flushTimer     time.Duration
 	cfg            ConnectionConfig
 	log            log.Logger
-	pbuf           *proto.Buffer
 	lastSend       time.Time
-	buf            []byte
-	seriesBuf      []prompb.TimeSeries
 	statsFunc      func(s types.NetworkStats)
 	stopCh         chan struct{}
 	stopCalled     atomic.Bool
@@ -44,10 +41,11 @@ type loop struct {
 	series         []*types.TimeSeries
 	self           actor.Actor
 	ticker         *time.Ticker
+	req            *prompb.WriteRequest
 }
 
 func newLoop(cc ConnectionConfig, log log.Logger, series func(s types.NetworkStats)) *loop {
-	return &loop{
+	l := &loop{
 		seriesMbx:      actor.NewMailbox[*types.TimeSeries](actor.OptCapacity(2 * cc.BatchCount)),
 		configMbx:      actor.NewMailbox[ConnectionConfig](),
 		metaSeriesMbx:  actor.NewMailbox[*types.MetaSeries](),
@@ -55,14 +53,17 @@ func newLoop(cc ConnectionConfig, log log.Logger, series func(s types.NetworkSta
 		flushTimer:     cc.FlushDuration,
 		client:         &http.Client{},
 		cfg:            cc,
-		pbuf:           proto.NewBuffer(nil),
-		buf:            make([]byte, 0),
 		log:            log,
-		seriesBuf:      make([]prompb.TimeSeries, 0),
 		statsFunc:      series,
 		externalLabels: cc.ExternalLabels,
 		ticker:         time.NewTicker(1 * time.Second),
 	}
+	l.req = &prompb.WriteRequest{
+		// We know BatchCount is the most we will ever send.
+		Timeseries: make([]prompb.TimeSeries, 0, cc.BatchCount),
+	}
+
+	return l
 }
 
 func (l *loop) Start() {
@@ -132,10 +133,12 @@ func (l *loop) DoWork(ctx actor.Context) actor.WorkerStatus {
 // trySend is the core functionality for sending data to a endpoint. It will attempt retries as defined in MaxRetryBackoffAttempts.
 func (l *loop) trySend(series []*types.TimeSeries) {
 	attempts := 0
+	var data []byte
 attempt:
 	level.Debug(l.log).Log("msg", "sending data", "attempts", attempts, "len", len(series))
 	start := time.Now()
-	result := l.send(series, attempts)
+	result := l.send(series, attempts, data)
+	data = result.data
 	duration := time.Since(start)
 	l.statsFunc(types.NetworkStats{
 		SendDuration: duration,
@@ -169,6 +172,7 @@ type sendResult struct {
 	successful       bool
 	recoverableError bool
 	retryAfter       time.Duration
+	data             []byte
 }
 
 func (l *loop) finishSending(series []*types.TimeSeries) {
@@ -176,78 +180,24 @@ func (l *loop) finishSending(series []*types.TimeSeries) {
 	l.lastSend = time.Now()
 }
 
-func (l *loop) send(series []*types.TimeSeries, retryCount int) sendResult {
+func (l *loop) send(series []*types.TimeSeries, retryCount int, data []byte) sendResult {
 	result := sendResult{}
-	l.pbuf.Reset()
-	// TODO @mattdurham move this code into its own function.
-	if cap(l.seriesBuf) < len(l.series) {
-		l.seriesBuf = make([]prompb.TimeSeries, len(l.series), len(l.series))
-	}
-	l.seriesBuf = l.seriesBuf[:len(series)]
-	for i, tsBuf := range series {
-		if cap(l.seriesBuf[i].Labels) < len(tsBuf.Labels) {
-			l.seriesBuf[i].Labels = make([]prompb.Label, len(tsBuf.Labels), len(tsBuf.Labels))
+	var err error
+	var buf []byte
+	// Check to see if this is a retry and we can reuse the buffer.
+	if len(data) == 0 {
+		data, err = createWriteRequest(series, l.externalLabels, data)
+		if err != nil {
+			result.err = err
+			return result
 		}
-		l.seriesBuf[i].Labels = l.seriesBuf[i].Labels[:len(tsBuf.Labels)]
-		if tsBuf.Histogram != nil {
-			if len(l.seriesBuf[i].Histograms) < 1 {
-				l.seriesBuf[i].Histograms = make([]prompb.Histogram, 1)
-			}
-			l.seriesBuf[i].Histograms[0] = tsBuf.Histogram.ToPromHistogram()
-		}
-		if tsBuf.FloatHistogram != nil {
-			if len(l.seriesBuf[i].Histograms) < 1 {
-				l.seriesBuf[i].Histograms = make([]prompb.Histogram, 1)
-			}
-			l.seriesBuf[i].Histograms[0] = tsBuf.FloatHistogram.ToPromFloatHistogram()
-		}
-
-		if tsBuf.Histogram == nil && tsBuf.FloatHistogram == nil {
-			l.seriesBuf[i].Histograms = l.seriesBuf[i].Histograms[:0]
-		}
-
-		if cap(l.seriesBuf[i].Samples) < 1 {
-			l.seriesBuf[i].Samples = make([]prompb.Sample, 1)
-		}
-		l.seriesBuf[i].Samples = l.seriesBuf[i].Samples[:1]
-		l.seriesBuf[i].Samples[0].Value = tsBuf.Value
-		l.seriesBuf[i].Samples[0].Timestamp = tsBuf.TS
-		for k, v := range tsBuf.Labels {
-			l.seriesBuf[i].Labels[k].Name = v.Name
-			l.seriesBuf[i].Labels[k].Value = v.Value
-		}
-	}
-	req := &prompb.WriteRequest{
-		Timeseries: l.seriesBuf,
-	}
-	for k, v := range l.externalLabels {
-		for i, ts := range req.Timeseries {
-			found := false
-			for _, lbl := range ts.Labels {
-				if lbl.Name == k {
-					lbl.Value = v
-					found = true
-					break
-				}
-			}
-			if !found {
-				ts.Labels = append(ts.Labels, prompb.Label{
-					Name:  k,
-					Value: v,
-				})
-			}
-			req.Timeseries[i] = ts
-		}
-	}
-	err := l.pbuf.Marshal(req)
-	if err != nil {
-		result.err = err
-		return result
+		buf = snappy.Encode(buf, data)
+	} else {
+		buf = data
 	}
 
-	l.buf = l.buf[:0]
-	l.buf = snappy.Encode(l.buf, l.pbuf.Bytes())
-	httpReq, err := http.NewRequest("POST", l.cfg.URL, bytes.NewReader(l.buf))
+	result.data = buf
+	httpReq, err := http.NewRequest("POST", l.cfg.URL, bytes.NewReader(buf))
 	if err != nil {
 		result.err = err
 		return result
@@ -271,6 +221,7 @@ func (l *loop) send(series []*types.TimeSeries, retryCount int) sendResult {
 		result.recoverableError = true
 		return result
 	}
+	defer resp.Body.Close()
 	// 500 errors are considered recoverable.
 	if resp.StatusCode/100 == 5 || resp.StatusCode == http.StatusTooManyRequests {
 		if resp.StatusCode == http.StatusTooManyRequests {
@@ -302,11 +253,9 @@ func (l *loop) send(series []*types.TimeSeries, retryCount int) sendResult {
 
 	// Find the newest
 	var newestTS int64
-	for _, ts := range req.Timeseries {
-		for _, sample := range ts.Samples {
-			if sample.Timestamp > newestTS {
-				newestTS = sample.Timestamp
-			}
+	for _, ts := range series {
+		if ts.TS > newestTS {
+			newestTS = ts.TS
 		}
 	}
 	l.statsFunc(types.NetworkStats{
@@ -316,6 +265,72 @@ func (l *loop) send(series []*types.TimeSeries, retryCount int) sendResult {
 
 	result.successful = true
 	return result
+}
+
+var tsPool = sync.Pool{New: func() any {
+	return &prompb.TimeSeries{}
+}}
+
+func createWriteRequest(series []*types.TimeSeries, externalLabels map[string]string, data []byte) ([]byte, error) {
+	wr := &prompb.WriteRequest{
+		Timeseries: make([]prompb.TimeSeries, len(series)),
+	}
+	for i, tsBuf := range series {
+		ts := tsPool.Get().(*prompb.TimeSeries)
+		if cap(ts.Labels) < len(tsBuf.Labels) {
+			ts.Labels = make([]prompb.Label, 0, len(tsBuf.Labels))
+		}
+		ts.Labels = ts.Labels[:len(tsBuf.Labels)]
+		for k, v := range tsBuf.Labels {
+			ts.Labels[k].Name = v.Name
+			ts.Labels[k].Value = v.Value
+		}
+		if tsBuf.Histogram != nil {
+			ts.Histograms = make([]prompb.Histogram, 1)
+			ts.Histograms[0] = tsBuf.Histogram.ToPromHistogram()
+		}
+		if tsBuf.FloatHistogram != nil {
+			ts.Histograms = make([]prompb.Histogram, 1)
+			ts.Histograms[0] = tsBuf.FloatHistogram.ToPromFloatHistogram()
+		}
+		// Encode the external labels inside if needed.
+		for k, v := range externalLabels {
+			found := false
+			for _, lbl := range ts.Labels {
+				if lbl.Name == k {
+					lbl.Value = v
+					found = true
+					break
+				}
+			}
+			if !found {
+				ts.Labels = append(ts.Labels, prompb.Label{
+					Name:  k,
+					Value: v,
+				})
+			}
+		}
+		if len(ts.Samples) == 0 {
+			ts.Samples = make([]prompb.Sample, 1)
+		}
+		ts.Samples[0].Value = tsBuf.Value
+		ts.Samples[0].Timestamp = tsBuf.TS
+		wr.Timeseries[i] = *ts
+	}
+	defer func() {
+		for i := 0; i < len(wr.Timeseries); i++ {
+			wr.Timeseries[i].Histograms = wr.Timeseries[i].Histograms[:0]
+			wr.Timeseries[i].Labels = wr.Timeseries[i].Labels[:0]
+			wr.Timeseries[i].Exemplars = wr.Timeseries[i].Exemplars[:0]
+			tsPool.Put(&wr.Timeseries[i])
+		}
+	}()
+	size := wr.Size()
+	if cap(data) < size {
+		data = make([]byte, size)
+	}
+	_, err := wr.MarshalTo(data)
+	return data, err
 }
 
 func retryAfterDuration(t string) time.Duration {
