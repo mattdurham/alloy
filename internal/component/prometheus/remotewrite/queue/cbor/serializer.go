@@ -7,7 +7,6 @@ import (
 
 	snappy "github.com/eapache/go-xerial-snappy"
 	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 	"github.com/vladopajic/go-actor/actor"
 )
@@ -26,7 +25,7 @@ type serializer struct {
 	flushTestTimer      *time.Ticker
 	series              []*types.TimeSeries
 	meta                []*types.MetaSeries
-	stringList          []string
+	msgpBuffer          []byte
 }
 
 func NewSerializer(maxItemsBeforeFlush int, flushDuration time.Duration, q types.FileStorage, l log.Logger) (types.Serializer, error) {
@@ -39,6 +38,7 @@ func NewSerializer(maxItemsBeforeFlush int, flushDuration time.Duration, q types
 		inbox:               actor.NewMailbox[[]*types.TimeSeries](),
 		metaInbox:           actor.NewMailbox[[]*types.MetaSeries](),
 		flushTestTimer:      time.NewTicker(1 * time.Second),
+		msgpBuffer:          make([]byte, 0),
 	}
 
 	return s, nil
@@ -70,7 +70,6 @@ func (s *serializer) DoWork(ctx actor.Context) actor.WorkerStatus {
 		if !ok {
 			return actor.WorkerEnd
 		}
-		level.Debug(s.logger).Log("msg", "received item", "len", len(item))
 		s.Append(ctx, item)
 		return actor.WorkerContinue
 	case item, ok := <-s.metaInbox.ReceiveC():
@@ -122,7 +121,6 @@ func (s *serializer) store(ctx actor.Context) error {
 	if len(s.series) == 0 && len(s.meta) == 0 {
 		return nil
 	}
-	s.stringList = s.stringList[:0]
 	group := &types.SeriesGroup{
 		Series:   make([]*types.TimeSeriesBinary, len(s.series)),
 		Metadata: make([]*types.MetaSeriesBinary, len(s.meta)),
@@ -147,9 +145,9 @@ func (s *serializer) store(ctx actor.Context) error {
 	for k, v := range strMapToInt {
 		stringsSlice[v] = k
 	}
-
 	group.Strings = stringsSlice
-	buf, err := group.MarshalMsg(nil)
+
+	buf, err := group.MarshalMsg(s.msgpBuffer)
 	if err != nil {
 		return err
 	}
@@ -201,5 +199,6 @@ func fillBinary(ts *types.TimeSeriesBinary, ser *types.TimeSeries, strMapToInt m
 		}
 		ts.LabelsValues[i] = val
 	}
+	return index
 
 }

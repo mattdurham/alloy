@@ -5,11 +5,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/golang/protobuf/proto"
 	"io"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/golang/protobuf/proto"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -137,7 +138,6 @@ func (l *loop) trySend(series []*types.TimeSeries) {
 	attempts := 0
 	var data []byte
 attempt:
-	level.Debug(l.log).Log("msg", "sending data", "attempts", attempts, "len", len(series))
 	start := time.Now()
 	result := l.send(series, attempts, data)
 	data = result.data
@@ -145,7 +145,6 @@ attempt:
 	l.statsFunc(types.NetworkStats{
 		SendDuration: duration,
 	})
-	level.Debug(l.log).Log("msg", "sending data result", "attempts", attempts, "successful", result.successful, "err", result.err)
 	if result.successful {
 		l.finishSending(series)
 		return

@@ -4,13 +4,12 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
+	"github.com/go-kit/log"
 	"github.com/grafana/alloy/internal/component"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
-	"github.com/grafana/alloy/internal/runtime/logging"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/prometheus/prometheus/storage"
@@ -18,6 +17,7 @@ import (
 )
 
 func BenchmarkE2E(b *testing.B) {
+	// Around 164k ops
 	type e2eTest struct {
 		name   string
 		maker  func(index int, app storage.Appender)
@@ -45,16 +45,11 @@ func BenchmarkE2E(b *testing.B) {
 	}
 }
 
-func runBenchmark(t *testing.B, add func(index int, appendable storage.Appender), test func(samples []prompb.TimeSeries)) {
+func runBenchmark(t *testing.B, add func(index int, appendable storage.Appender), _ func(samples []prompb.TimeSeries)) {
 	t.ReportAllocs()
-	l, _ := logging.New(os.Stderr, logging.Options{
-		Level:  logging.LevelError,
-		Format: logging.FormatLogfmt,
-	})
+	l := log.NewNopLogger()
 	done := make(chan struct{})
-	samples := make([]prompb.TimeSeries, 0)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		return
 	}))
 	expCh := make(chan types.Exports, 1)
 	c, err := newComponentBenchmark(t, l, srv.URL, expCh)
@@ -85,11 +80,10 @@ func runBenchmark(t *testing.B, add func(index int, appendable storage.Appender)
 	case <-tm.C:
 	}
 	cancel()
-	test(samples)
 
 }
 
-func newComponentBenchmark(t *testing.B, l *logging.Logger, url string, exp chan types.Exports) (*Queue, error) {
+func newComponentBenchmark(t *testing.B, l log.Logger, url string, exp chan types.Exports) (*Queue, error) {
 	return NewComponent(component.Options{
 		ID:       "test",
 		Logger:   l,
@@ -101,7 +95,7 @@ func newComponentBenchmark(t *testing.B, l *logging.Logger, url string, exp chan
 		Tracer:     nil,
 	}, types.Arguments{
 		TTL:           2 * time.Hour,
-		MaxFlushSize:  16 * 1024 * 1024,
+		MaxFlushSize:  100_000,
 		FlushDuration: 1 * time.Second,
 		Connections: []types.ConnectionConfig{{
 			Name:                    "test",
@@ -127,8 +121,6 @@ func (f fakeRegistry) Register(collector prometheus.Collector) error {
 }
 
 func (f fakeRegistry) MustRegister(collector ...prometheus.Collector) {
-	return
-
 }
 
 func (f fakeRegistry) Unregister(collector prometheus.Collector) bool {

@@ -125,7 +125,7 @@ func (s *Queue) createEndpoints() error {
 		end := NewEndpoint(client, nil, stats, meta, s.args.TTL, s.opts.Logger)
 		// This wait group is to ensure we are started before we send on the mailbox.
 		fq, err := filequeue.NewQueue(filepath.Join(s.opts.DataPath, ep.Name, "wal"), func(ctx context.Context, dh types.DataHandle) {
-			_ = end.mbx.Send(ctx, dh)
+			_ = end.incoming.Send(ctx, dh)
 		}, s.opts.Logger)
 		if err != nil {
 			return err

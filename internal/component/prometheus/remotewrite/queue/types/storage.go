@@ -80,7 +80,7 @@ func BinaryToTimeSeries(bin *TimeSeriesBinary, items []string) *TimeSeries {
 	return ts
 }
 
-func DeserializeToSeriesGroup(sg *SeriesGroup, buf []byte) (*SeriesGroup, error) {
-	buf, err := sg.UnmarshalMsg(buf)
-	return sg, err
+func DeserializeToSeriesGroup(sg *SeriesGroup, buf []byte) (*SeriesGroup, []byte, error) {
+	buffer, err := sg.UnmarshalMsg(buf)
+	return sg, buffer, err
 }

@@ -13,6 +13,7 @@ import (
 
 var _ actor.Worker = (*endpoint)(nil)
 
+// endpoint handles communication between the serializer, filequeue and network.
 type endpoint struct {
 	network    types.NetworkClient
 	serializer types.Serializer
@@ -21,7 +22,7 @@ type endpoint struct {
 	log        log.Logger
 	ctx        context.Context
 	ttl        time.Duration
-	mbx        actor.Mailbox[types.DataHandle]
+	incoming   actor.Mailbox[types.DataHandle]
 	buf        []byte
 	self       actor.Actor
 	sg         *types.SeriesGroup
@@ -35,14 +36,14 @@ func NewEndpoint(client types.NetworkClient, serializer types.Serializer, stats,
 		metaStats:  metatStats,
 		log:        logger,
 		ttl:        ttl,
-		mbx:        actor.NewMailbox[types.DataHandle](),
+		incoming:   actor.NewMailbox[types.DataHandle](),
 		buf:        make([]byte, 0, 1024),
 		sg:         &types.SeriesGroup{},
 	}
 }
 
 func (ep *endpoint) Start() {
-	ep.self = actor.Combine(actor.New(ep), ep.mbx).Build()
+	ep.self = actor.Combine(actor.New(ep), ep.incoming).Build()
 	ep.self.Start()
 	ep.serializer.Start()
 	ep.network.Start()
@@ -59,27 +60,28 @@ func (ep *endpoint) DoWork(ctx actor.Context) actor.WorkerStatus {
 	select {
 	case <-ctx.Done():
 		return actor.WorkerEnd
-	case item, ok := <-ep.mbx.ReceiveC():
+	case file, ok := <-ep.incoming.ReceiveC():
 		if !ok {
 			return actor.WorkerEnd
 		}
-		meta, buf, err := item.Get()
+		meta, buf, err := file.Get()
 		if err != nil {
 			return actor.WorkerEnd
 		}
-		ep.handleItem(meta, buf)
+		ep.deserializeAndSend(ctx, meta, buf)
 		return actor.WorkerContinue
 	}
 }
 
-func (ep *endpoint) handleItem(meta map[string]string, buf []byte) {
+func (ep *endpoint) deserializeAndSend(ctx context.Context, _ map[string]string, buf []byte) {
 	var err error
 	ep.buf, err = snappy.Decode(buf)
 	if err != nil {
 		level.Debug(ep.log).Log("msg", "error snappy decoding", "err", err)
 		return
 	}
-	sg, err := types.DeserializeToSeriesGroup(ep.sg, ep.buf)
+	var sg *types.SeriesGroup
+	sg, ep.buf, err = types.DeserializeToSeriesGroup(ep.sg, ep.buf)
 	if err != nil {
 		level.Debug(ep.log).Log("msg", "error deserializing", "err", err)
 		return
@@ -89,11 +91,11 @@ func (ep *endpoint) handleItem(meta map[string]string, buf []byte) {
 		// One last chance to check the TTL. Writing to the filequeue will check it but
 		// in a situation where the network is down and writing backs up we dont want to send
 		// data that will get rejected.
-		old := time.Since(time.Unix(series.TS, 0))
-		if old > ep.ttl {
+		seriesAge := time.Since(time.Unix(series.TS, 0))
+		if seriesAge > ep.ttl {
 			continue
 		}
-		sendErr := ep.network.SendSeries(context.Background(), series.Hash, types.BinaryToTimeSeries(&series, sg.Strings))
+		sendErr := ep.network.SendSeries(ctx, series.Hash, types.BinaryToTimeSeries(series, sg.Strings))
 		if sendErr != nil {
 			level.Error(ep.log).Log("msg", "error sending to write client", "err", sendErr)
 		}

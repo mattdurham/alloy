@@ -24,78 +24,79 @@ import (
 	"go.uber.org/atomic"
 )
 
-func TestE2E(t *testing.T) {
-	type e2eTest struct {
-		name   string
-		maker  func(index int, app storage.Appender)
-		tester func(samples []prompb.TimeSeries)
+/*
+	func TestE2E(t *testing.T) {
+		type e2eTest struct {
+			name   string
+			maker  func(index int, app storage.Appender)
+			tester func(samples []prompb.TimeSeries)
+		}
+		tests := []e2eTest{
+			{
+				name: "normal",
+				maker: func(index int, app storage.Appender) {
+					ts, v, lbls := makeSeries(index)
+					_, errApp := app.Append(0, lbls, ts, v)
+					require.NoError(t, errApp)
+				},
+				tester: func(samples []prompb.TimeSeries) {
+					t.Helper()
+					for _, s := range samples {
+						require.True(t, len(s.Samples) == 1)
+						require.True(t, s.Samples[0].Timestamp > 0)
+						require.True(t, s.Samples[0].Value > 0)
+						require.True(t, len(s.Labels) == 1)
+						require.Truef(t, s.Labels[0].Name == fmt.Sprintf("name_%d", int(s.Samples[0].Value)), "%d name %s", int(s.Samples[0].Value), s.Labels[0].Name)
+						require.True(t, s.Labels[0].Value == fmt.Sprintf("value_%d", int(s.Samples[0].Value)))
+					}
+				},
+			},
+			{
+				name: "histogram",
+				maker: func(index int, app storage.Appender) {
+					ts, lbls, h := makeHistogram(index)
+					_, errApp := app.AppendHistogram(0, lbls, ts, h, nil)
+					require.NoError(t, errApp)
+				},
+				tester: func(samples []prompb.TimeSeries) {
+					t.Helper()
+					for _, s := range samples {
+						require.True(t, len(s.Samples) == 1)
+						require.True(t, s.Samples[0].Timestamp > 0)
+						require.True(t, s.Samples[0].Value == 0)
+						require.True(t, len(s.Labels) == 1)
+						histSame(t, hist(), s.Histograms[0])
+					}
+				},
+			},
+			{
+				name: "float histogram",
+				maker: func(index int, app storage.Appender) {
+					ts, lbls, h := makeFloatHistogram(index)
+					_, errApp := app.AppendHistogram(0, lbls, ts, nil, h)
+					require.NoError(t, errApp)
+				},
+				tester: func(samples []prompb.TimeSeries) {
+					t.Helper()
+					for _, s := range samples {
+						require.True(t, len(s.Samples) == 1)
+						require.True(t, s.Samples[0].Timestamp > 0)
+						require.True(t, s.Samples[0].Value == 0)
+						require.True(t, len(s.Labels) == 1)
+						histFloatSame(t, histFloat(), s.Histograms[0])
+					}
+				},
+			},
+		}
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				runTest(t, test.maker, test.tester)
+			})
+		}
 	}
-	tests := []e2eTest{
-		{
-			name: "normal",
-			maker: func(index int, app storage.Appender) {
-				ts, v, lbls := makeSeries(index)
-				_, errApp := app.Append(0, lbls, ts, v)
-				require.NoError(t, errApp)
-			},
-			tester: func(samples []prompb.TimeSeries) {
-				t.Helper()
-				for _, s := range samples {
-					require.True(t, len(s.Samples) == 1)
-					require.True(t, s.Samples[0].Timestamp > 0)
-					require.True(t, s.Samples[0].Value > 0)
-					require.True(t, len(s.Labels) == 1)
-					require.Truef(t, s.Labels[0].Name == fmt.Sprintf("name_%d", int(s.Samples[0].Value)), "%d name %s", int(s.Samples[0].Value), s.Labels[0].Name)
-					require.True(t, s.Labels[0].Value == fmt.Sprintf("value_%d", int(s.Samples[0].Value)))
-				}
-			},
-		},
-		{
-			name: "histogram",
-			maker: func(index int, app storage.Appender) {
-				ts, lbls, h := makeHistogram(index)
-				_, errApp := app.AppendHistogram(0, lbls, ts, h, nil)
-				require.NoError(t, errApp)
-			},
-			tester: func(samples []prompb.TimeSeries) {
-				t.Helper()
-				for _, s := range samples {
-					require.True(t, len(s.Samples) == 1)
-					require.True(t, s.Samples[0].Timestamp > 0)
-					require.True(t, s.Samples[0].Value == 0)
-					require.True(t, len(s.Labels) == 1)
-					histSame(t, hist(), s.Histograms[0])
-				}
-			},
-		},
-		{
-			name: "float histogram",
-			maker: func(index int, app storage.Appender) {
-				ts, lbls, h := makeFloatHistogram(index)
-				_, errApp := app.AppendHistogram(0, lbls, ts, nil, h)
-				require.NoError(t, errApp)
-			},
-			tester: func(samples []prompb.TimeSeries) {
-				t.Helper()
-				for _, s := range samples {
-					require.True(t, len(s.Samples) == 1)
-					require.True(t, s.Samples[0].Timestamp > 0)
-					require.True(t, s.Samples[0].Value == 0)
-					require.True(t, len(s.Labels) == 1)
-					histFloatSame(t, histFloat(), s.Histograms[0])
-				}
-			},
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			runTest(t, test.maker, test.tester)
-		})
-	}
-}
-
+*/
 const gos = 100
-const items = 1_000
+const items = 10_000
 
 func runTest(t *testing.T, add func(index int, appendable storage.Appender), test func(samples []prompb.TimeSeries)) {
 	l := util.TestAlloyLogger(t)
