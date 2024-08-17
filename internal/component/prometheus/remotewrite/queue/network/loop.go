@@ -5,10 +5,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/golang/protobuf/proto"
 	"io"
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/go-kit/log"
@@ -42,6 +42,7 @@ type loop struct {
 	self           actor.Actor
 	ticker         *time.Ticker
 	req            *prompb.WriteRequest
+	buf            *proto.Buffer
 }
 
 func newLoop(cc ConnectionConfig, log log.Logger, series func(s types.NetworkStats)) *loop {
@@ -57,6 +58,7 @@ func newLoop(cc ConnectionConfig, log log.Logger, series func(s types.NetworkSta
 		statsFunc:      series,
 		externalLabels: cc.ExternalLabels,
 		ticker:         time.NewTicker(1 * time.Second),
+		buf:            proto.NewBuffer(nil),
 	}
 	l.req = &prompb.WriteRequest{
 		// We know BatchCount is the most we will ever send.
@@ -186,7 +188,7 @@ func (l *loop) send(series []*types.TimeSeries, retryCount int, data []byte) sen
 	var buf []byte
 	// Check to see if this is a retry and we can reuse the buffer.
 	if len(data) == 0 {
-		data, err = createWriteRequest(l.req, series, l.externalLabels, data)
+		data, err = createWriteRequest(l.req, series, l.externalLabels, l.buf)
 		if err != nil {
 			result.err = err
 			return result
@@ -267,17 +269,13 @@ func (l *loop) send(series []*types.TimeSeries, retryCount int, data []byte) sen
 	return result
 }
 
-var tsPool = sync.Pool{New: func() any {
-	return &prompb.TimeSeries{}
-}}
-
-func createWriteRequest(wr *prompb.WriteRequest, series []*types.TimeSeries, externalLabels map[string]string, data []byte) ([]byte, error) {
+func createWriteRequest(wr *prompb.WriteRequest, series []*types.TimeSeries, externalLabels map[string]string, data *proto.Buffer) ([]byte, error) {
 	if cap(wr.Timeseries) < len(series) {
 		wr.Timeseries = make([]prompb.TimeSeries, len(series))
 	}
-	wr.Timeseries = wr.Timeseries[0:len(series)]
+	wr.Timeseries = wr.Timeseries[:len(series)]
 	for i, tsBuf := range series {
-		ts := tsPool.Get().(*prompb.TimeSeries)
+		ts := wr.Timeseries[i]
 		if cap(ts.Labels) < len(tsBuf.Labels) {
 			ts.Labels = make([]prompb.Label, 0, len(tsBuf.Labels))
 		}
@@ -288,6 +286,8 @@ func createWriteRequest(wr *prompb.WriteRequest, series []*types.TimeSeries, ext
 		}
 		if cap(ts.Histograms) == 0 {
 			ts.Histograms = make([]prompb.Histogram, 1)
+		} else {
+			ts.Histograms = ts.Histograms[:0]
 		}
 		if tsBuf.Histogram != nil {
 			ts.Histograms = ts.Histograms[:1]
@@ -297,9 +297,7 @@ func createWriteRequest(wr *prompb.WriteRequest, series []*types.TimeSeries, ext
 			ts.Histograms = ts.Histograms[:1]
 			ts.Histograms[0] = tsBuf.FloatHistogram.ToPromFloatHistogram()
 		}
-		if tsBuf.Histogram == nil && tsBuf.FloatHistogram == nil {
-			ts.Histograms = ts.Histograms[:0]
-		}
+
 		// Encode the external labels inside if needed.
 		for k, v := range externalLabels {
 			found := false
@@ -322,22 +320,18 @@ func createWriteRequest(wr *prompb.WriteRequest, series []*types.TimeSeries, ext
 		}
 		ts.Samples[0].Value = tsBuf.Value
 		ts.Samples[0].Timestamp = tsBuf.TS
-		wr.Timeseries[i] = *ts
+		wr.Timeseries[i] = ts
 	}
 	defer func() {
 		for i := 0; i < len(wr.Timeseries); i++ {
 			wr.Timeseries[i].Histograms = wr.Timeseries[i].Histograms[:0]
 			wr.Timeseries[i].Labels = wr.Timeseries[i].Labels[:0]
 			wr.Timeseries[i].Exemplars = wr.Timeseries[i].Exemplars[:0]
-			tsPool.Put(&wr.Timeseries[i])
 		}
 	}()
-	size := wr.Size()
-	if cap(data) < size {
-		data = make([]byte, size)
-	}
-	_, err := wr.MarshalTo(data)
-	return data, err
+	data.Reset()
+	err := data.Marshal(wr)
+	return data.Bytes(), err
 }
 
 func retryAfterDuration(t string) time.Duration {
