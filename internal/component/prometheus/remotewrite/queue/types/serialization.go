@@ -3,8 +3,8 @@ package types
 
 type SeriesGroup struct {
 	Strings  []string
-	Series   []TimeSeriesBinary
-	Metadata []MetaSeriesBinary
+	Series   []*TimeSeriesBinary
+	Metadata []*MetaSeriesBinary
 }
 
 type TimeSeriesBinary struct {

@@ -2,11 +2,11 @@ package types
 
 import (
 	"fmt"
-	"github.com/prometheus/prometheus/prompb"
-	"go.uber.org/atomic"
-	"reflect"
 	"sync"
 	"time"
+
+	"github.com/prometheus/prometheus/prompb"
+	"go.uber.org/atomic"
 
 	"github.com/grafana/alloy/syntax/alloytypes"
 	"github.com/prometheus/prometheus/model/histogram"
@@ -188,7 +188,7 @@ type MetaSeries struct {
 func defaultArgs() Arguments {
 	return Arguments{
 		TTL:               2 * time.Hour,
-		BatchSizeBytes:    16 * 1024 * 1024,
+		MaxFlushSize:      10_000,
 		FlushDuration:     5 * time.Second,
 		AppenderBatchSize: 1_000,
 	}
@@ -198,30 +198,13 @@ type Arguments struct {
 	// TTL is how old a series can be.
 	TTL time.Duration `alloy:"ttl,attr,optional"`
 	// The batch size to persist to the file queue.
-	BatchSizeBytes int `alloy:"batch_size_bytes,attr,optional"`
+	MaxFlushSize int `alloy:"max_flush_size,attr,optional"`
 	// How often to flush to the file queue if BatchSizeBytes isn't met.
 	FlushDuration time.Duration      `alloy:"flush_duration,attr,optional"`
 	Connections   []ConnectionConfig `alloy:"endpoint,block"`
 	// AppenderBatchSize determines how often to flush the appender batch size.
 	AppenderBatchSize int               `alloy:"appender_batch_size,attr,optional"`
 	ExternalLabels    map[string]string `alloy:"external_labels,attr,optional"`
-}
-
-func (a Arguments) TriggerSerializationChange(b Arguments) bool {
-	if a.TTL != b.TTL {
-		return true
-	}
-	if a.BatchSizeBytes != b.BatchSizeBytes {
-		return true
-	}
-	if a.FlushDuration != b.FlushDuration {
-		return true
-	}
-	return true
-}
-
-func (a Arguments) TriggerWriteClientChange(b Arguments) bool {
-	return reflect.DeepEqual(a.Connections, b.Connections)
 }
 
 type ConnectionConfig struct {

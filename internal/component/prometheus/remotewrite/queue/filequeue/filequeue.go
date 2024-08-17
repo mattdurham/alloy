@@ -3,12 +3,13 @@ package filequeue
 import (
 	"context"
 	"fmt"
-	"github.com/grafana/alloy/internal/runtime/logging/level"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/grafana/alloy/internal/runtime/logging/level"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/go-kit/log"
@@ -17,7 +18,10 @@ import (
 )
 
 var _ actor.Worker = (*queue)(nil)
+var _ types.FileStorage = (*queue)(nil)
 
+// queue represents the on disk queue. This is an ordered list by id in the format: <id>.committed
+// Each file contains a byte buffer and an optional metatdata map.
 type queue struct {
 	self      actor.Actor
 	directory string
@@ -25,14 +29,15 @@ type queue struct {
 	logger    log.Logger
 	inbox     actor.Mailbox[types.Data]
 	out       func(ctx context.Context, dh types.DataHandle)
-	ids       []string
+	// existingFiles is the list of files found initially.
+	existingsFiles []string
 }
 
 func (q *queue) Start() {
 	q.self = actor.Combine(actor.New(q), q.inbox).Build()
 	q.self.Start()
 	// Queue up our existing items.
-	for _, name := range q.ids {
+	for _, name := range q.existingsFiles {
 		q.out(context.TODO(), types.DataHandle{
 			Name: name,
 			Get: func() (map[string]string, []byte, error) {
@@ -40,6 +45,10 @@ func (q *queue) Start() {
 			},
 		})
 	}
+}
+
+func (q *queue) Stop() {
+	q.self.Stop()
 }
 
 // Record wraps the input data and combines it with the metadata.
@@ -55,9 +64,13 @@ func NewQueue(directory string, out func(ctx context.Context, dh types.DataHandl
 		return nil, err
 	}
 
+	// We dont actually support uncommitted but I think its good to at least have some naming to avoid parsing random files
+	// that get installed into the system.
 	matches, _ := filepath.Glob(filepath.Join(directory, "*.committed"))
 	ids := make([]int, len(matches))
 
+	// Try and grab the id from each file.
+	// 1.committed
 	for i, x := range matches {
 		id, err := strconv.Atoi(strings.ReplaceAll(filepath.Base(x), ".committed", ""))
 		if err != nil {
@@ -71,18 +84,18 @@ func NewQueue(directory string, out func(ctx context.Context, dh types.DataHandl
 		currentIndex = ids[len(ids)-1]
 	}
 	q := &queue{
-		directory: directory,
-		maxIndex:  currentIndex,
-		logger:    logger,
-		out:       out,
-		inbox:     actor.NewMailbox[types.Data](),
-		ids:       make([]string, 0),
+		directory:      directory,
+		maxIndex:       currentIndex,
+		logger:         logger,
+		out:            out,
+		inbox:          actor.NewMailbox[types.Data](),
+		existingsFiles: make([]string, 0),
 	}
 
 	// Push the files that currently exist to the channel.
 	for _, id := range ids {
 		name := filepath.Join(directory, fmt.Sprintf("%d.committed", id))
-		q.ids = append(q.ids, name)
+		q.existingsFiles = append(q.existingsFiles, name)
 	}
 	return q, nil
 }
@@ -94,13 +107,10 @@ func (q *queue) Send(ctx context.Context, meta map[string]string, data []byte) e
 	})
 }
 
-func (q *queue) Stop() {
-	q.self.Stop()
-}
-
+// get returns the data of the file or an error if something wrong went on.
 func get(name string) (map[string]string, []byte, error) {
-	buf, err := readFile(name)
 	defer deleteFile(name)
+	buf, err := readFile(name)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -116,14 +126,15 @@ func (q *queue) DoWork(ctx actor.Context) actor.WorkerStatus {
 	select {
 	case <-ctx.Done():
 		return actor.WorkerEnd
-	case item := <-q.inbox.ReceiveC():
-		level.Debug(q.logger).Log("msg", "received item")
+	case item, ok := <-q.inbox.ReceiveC():
+		if !ok {
+			return actor.WorkerEnd
+		}
 		name, err := q.add(item.Meta, item.Data)
 		if err != nil {
 			level.Error(q.logger).Log("msg", "error adding item", "err", err)
 			return actor.WorkerContinue
 		}
-		level.Debug(q.logger).Log("msg", "writing item")
 		q.out(ctx, types.DataHandle{
 			Name: name,
 			Get: func() (map[string]string, []byte, error) {

@@ -2984,13 +2984,25 @@ func (z *SeriesGroup) DecodeMsg(dc *msgp.Reader) (err error) {
 			if cap(z.Series) >= int(zb0003) {
 				z.Series = (z.Series)[:zb0003]
 			} else {
-				z.Series = make([]TimeSeriesBinary, zb0003)
+				z.Series = make([]*TimeSeriesBinary, zb0003)
 			}
 			for za0002 := range z.Series {
-				err = z.Series[za0002].DecodeMsg(dc)
-				if err != nil {
-					err = msgp.WrapError(err, "Series", za0002)
-					return
+				if dc.IsNil() {
+					err = dc.ReadNil()
+					if err != nil {
+						err = msgp.WrapError(err, "Series", za0002)
+						return
+					}
+					z.Series[za0002] = nil
+				} else {
+					if z.Series[za0002] == nil {
+						z.Series[za0002] = new(TimeSeriesBinary)
+					}
+					err = z.Series[za0002].DecodeMsg(dc)
+					if err != nil {
+						err = msgp.WrapError(err, "Series", za0002)
+						return
+					}
 				}
 			}
 		case "Metadata":
@@ -3003,13 +3015,25 @@ func (z *SeriesGroup) DecodeMsg(dc *msgp.Reader) (err error) {
 			if cap(z.Metadata) >= int(zb0004) {
 				z.Metadata = (z.Metadata)[:zb0004]
 			} else {
-				z.Metadata = make([]MetaSeriesBinary, zb0004)
+				z.Metadata = make([]*MetaSeriesBinary, zb0004)
 			}
 			for za0003 := range z.Metadata {
-				err = z.Metadata[za0003].DecodeMsg(dc)
-				if err != nil {
-					err = msgp.WrapError(err, "Metadata", za0003)
-					return
+				if dc.IsNil() {
+					err = dc.ReadNil()
+					if err != nil {
+						err = msgp.WrapError(err, "Metadata", za0003)
+						return
+					}
+					z.Metadata[za0003] = nil
+				} else {
+					if z.Metadata[za0003] == nil {
+						z.Metadata[za0003] = new(MetaSeriesBinary)
+					}
+					err = z.Metadata[za0003].DecodeMsg(dc)
+					if err != nil {
+						err = msgp.WrapError(err, "Metadata", za0003)
+						return
+					}
 				}
 			}
 		default:
@@ -3054,10 +3078,17 @@ func (z *SeriesGroup) EncodeMsg(en *msgp.Writer) (err error) {
 		return
 	}
 	for za0002 := range z.Series {
-		err = z.Series[za0002].EncodeMsg(en)
-		if err != nil {
-			err = msgp.WrapError(err, "Series", za0002)
-			return
+		if z.Series[za0002] == nil {
+			err = en.WriteNil()
+			if err != nil {
+				return
+			}
+		} else {
+			err = z.Series[za0002].EncodeMsg(en)
+			if err != nil {
+				err = msgp.WrapError(err, "Series", za0002)
+				return
+			}
 		}
 	}
 	// write "Metadata"
@@ -3071,10 +3102,17 @@ func (z *SeriesGroup) EncodeMsg(en *msgp.Writer) (err error) {
 		return
 	}
 	for za0003 := range z.Metadata {
-		err = z.Metadata[za0003].EncodeMsg(en)
-		if err != nil {
-			err = msgp.WrapError(err, "Metadata", za0003)
-			return
+		if z.Metadata[za0003] == nil {
+			err = en.WriteNil()
+			if err != nil {
+				return
+			}
+		} else {
+			err = z.Metadata[za0003].EncodeMsg(en)
+			if err != nil {
+				err = msgp.WrapError(err, "Metadata", za0003)
+				return
+			}
 		}
 	}
 	return
@@ -3094,20 +3132,28 @@ func (z *SeriesGroup) MarshalMsg(b []byte) (o []byte, err error) {
 	o = append(o, 0xa6, 0x53, 0x65, 0x72, 0x69, 0x65, 0x73)
 	o = msgp.AppendArrayHeader(o, uint32(len(z.Series)))
 	for za0002 := range z.Series {
-		o, err = z.Series[za0002].MarshalMsg(o)
-		if err != nil {
-			err = msgp.WrapError(err, "Series", za0002)
-			return
+		if z.Series[za0002] == nil {
+			o = msgp.AppendNil(o)
+		} else {
+			o, err = z.Series[za0002].MarshalMsg(o)
+			if err != nil {
+				err = msgp.WrapError(err, "Series", za0002)
+				return
+			}
 		}
 	}
 	// string "Metadata"
 	o = append(o, 0xa8, 0x4d, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61)
 	o = msgp.AppendArrayHeader(o, uint32(len(z.Metadata)))
 	for za0003 := range z.Metadata {
-		o, err = z.Metadata[za0003].MarshalMsg(o)
-		if err != nil {
-			err = msgp.WrapError(err, "Metadata", za0003)
-			return
+		if z.Metadata[za0003] == nil {
+			o = msgp.AppendNil(o)
+		} else {
+			o, err = z.Metadata[za0003].MarshalMsg(o)
+			if err != nil {
+				err = msgp.WrapError(err, "Metadata", za0003)
+				return
+			}
 		}
 	}
 	return
@@ -3160,13 +3206,24 @@ func (z *SeriesGroup) UnmarshalMsg(bts []byte) (o []byte, err error) {
 			if cap(z.Series) >= int(zb0003) {
 				z.Series = (z.Series)[:zb0003]
 			} else {
-				z.Series = make([]TimeSeriesBinary, zb0003)
+				z.Series = make([]*TimeSeriesBinary, zb0003)
 			}
 			for za0002 := range z.Series {
-				bts, err = z.Series[za0002].UnmarshalMsg(bts)
-				if err != nil {
-					err = msgp.WrapError(err, "Series", za0002)
-					return
+				if msgp.IsNil(bts) {
+					bts, err = msgp.ReadNilBytes(bts)
+					if err != nil {
+						return
+					}
+					z.Series[za0002] = nil
+				} else {
+					if z.Series[za0002] == nil {
+						z.Series[za0002] = new(TimeSeriesBinary)
+					}
+					bts, err = z.Series[za0002].UnmarshalMsg(bts)
+					if err != nil {
+						err = msgp.WrapError(err, "Series", za0002)
+						return
+					}
 				}
 			}
 		case "Metadata":
@@ -3179,13 +3236,24 @@ func (z *SeriesGroup) UnmarshalMsg(bts []byte) (o []byte, err error) {
 			if cap(z.Metadata) >= int(zb0004) {
 				z.Metadata = (z.Metadata)[:zb0004]
 			} else {
-				z.Metadata = make([]MetaSeriesBinary, zb0004)
+				z.Metadata = make([]*MetaSeriesBinary, zb0004)
 			}
 			for za0003 := range z.Metadata {
-				bts, err = z.Metadata[za0003].UnmarshalMsg(bts)
-				if err != nil {
-					err = msgp.WrapError(err, "Metadata", za0003)
-					return
+				if msgp.IsNil(bts) {
+					bts, err = msgp.ReadNilBytes(bts)
+					if err != nil {
+						return
+					}
+					z.Metadata[za0003] = nil
+				} else {
+					if z.Metadata[za0003] == nil {
+						z.Metadata[za0003] = new(MetaSeriesBinary)
+					}
+					bts, err = z.Metadata[za0003].UnmarshalMsg(bts)
+					if err != nil {
+						err = msgp.WrapError(err, "Metadata", za0003)
+						return
+					}
 				}
 			}
 		default:
@@ -3208,11 +3276,19 @@ func (z *SeriesGroup) Msgsize() (s int) {
 	}
 	s += 7 + msgp.ArrayHeaderSize
 	for za0002 := range z.Series {
-		s += z.Series[za0002].Msgsize()
+		if z.Series[za0002] == nil {
+			s += msgp.NilSize
+		} else {
+			s += z.Series[za0002].Msgsize()
+		}
 	}
 	s += 9 + msgp.ArrayHeaderSize
 	for za0003 := range z.Metadata {
-		s += z.Metadata[za0003].Msgsize()
+		if z.Metadata[za0003] == nil {
+			s += msgp.NilSize
+		} else {
+			s += z.Metadata[za0003].Msgsize()
+		}
 	}
 	return
 }

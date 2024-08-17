@@ -3,12 +3,13 @@ package cbor
 import (
 	"context"
 	"fmt"
-	"github.com/go-kit/log"
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
-	"github.com/prometheus/prometheus/model/labels"
 	"math/rand"
 	"testing"
 	"time"
+
+	"github.com/go-kit/log"
+	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
+	"github.com/prometheus/prometheus/model/labels"
 )
 
 var lbls = labels.FromStrings("one", "two", "three", "four")
@@ -28,15 +29,15 @@ func BenchmarkAppender(b *testing.B) {
 }
 
 func BenchmarkSerializer(b *testing.B) {
-	// This should be around 60 allocs
+	// This should be around 1k allocs
 	series := getTimeSeries(b)
 	b.ResetTimer()
 	b.ReportAllocs()
 	logger := log.NewNopLogger()
 	for i := 0; i < b.N; i++ {
-		serial, _ := NewSerializer(16*1024*1024, 5*time.Second, &fakeFileQueue{}, logger)
+		serial, _ := NewSerializer(10_000, 5*time.Second, &fakeFileQueue{}, logger)
 		serial.Start()
-		for j := 0; j < 10; j++ {
+		for j := 0; j < 100_000; j++ {
 			_ = serial.SendSeries(context.Background(), series)
 		}
 		serial.Stop()

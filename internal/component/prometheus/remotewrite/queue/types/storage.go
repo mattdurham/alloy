@@ -2,8 +2,9 @@ package types
 
 import (
 	"context"
-	"go.uber.org/atomic"
 	"sync"
+
+	"go.uber.org/atomic"
 )
 
 type FileStorage interface {
@@ -41,15 +42,10 @@ func GetTimeSeriesBinarySlice(n int) []*TimeSeriesBinary {
 }
 
 func PutTimeSeriesBinarySlice(tss []*TimeSeriesBinary) {
-	for _, ts := range tss {
-		PutTimeSeriesBinary(ts)
+	for i := 0; i < len(tss); i++ {
+		PutTimeSeriesBinary(tss[i])
 	}
-}
 
-func PutTimeSeriesBinarySliceValue(tss []TimeSeriesBinary) {
-	for _, ts := range tss {
-		PutTimeSeriesBinary(&ts)
-	}
 }
 
 func PutTimeSeriesBinary(ts *TimeSeriesBinary) {

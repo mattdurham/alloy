@@ -3,6 +3,13 @@ package queue
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"testing"
+	"time"
+
 	"github.com/golang/snappy"
 	"github.com/grafana/alloy/internal/component"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
@@ -15,12 +22,6 @@ import (
 	"github.com/prometheus/prometheus/storage"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"reflect"
-	"testing"
-	"time"
 )
 
 func TestE2E(t *testing.T) {
@@ -267,9 +268,9 @@ func newComponent(t *testing.T, l *logging.Logger, url string, exp chan types.Ex
 		Registerer: prometheus.NewRegistry(),
 		Tracer:     nil,
 	}, types.Arguments{
-		TTL:            2 * time.Hour,
-		BatchSizeBytes: 16 * 1024 * 1024,
-		FlushDuration:  1 * time.Second,
+		TTL:           2 * time.Hour,
+		MaxFlushSize:  16 * 1024 * 1024,
+		FlushDuration: 1 * time.Second,
 		Connections: []types.ConnectionConfig{{
 			Name:                    "test",
 			URL:                     url,

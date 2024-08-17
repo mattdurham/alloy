@@ -3,13 +3,6 @@ package cbor
 import (
 	"context"
 	"fmt"
-	"github.com/dustin/go-humanize"
-	log2 "github.com/go-kit/log"
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
-	"github.com/grafana/alloy/internal/static/metrics/wal"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/prometheus/model/labels"
-	"github.com/stretchr/testify/require"
 	"io/fs"
 	"math/rand"
 	"os"
@@ -18,6 +11,14 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/dustin/go-humanize"
+	log2 "github.com/go-kit/log"
+	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
+	"github.com/grafana/alloy/internal/static/metrics/wal"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/prometheus/model/labels"
+	"github.com/stretchr/testify/require"
 )
 
 type test struct {
@@ -55,7 +56,7 @@ func BenchmarkSimpleCbor(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				q := &fq{}
 				l := log2.NewNopLogger()
-				wr, err := NewSerializer(16*1024*1024, 500*time.Millisecond, q, l)
+				wr, err := NewSerializer(100_000, 500*time.Millisecond, q, l)
 				wr.Start()
 				require.NoError(b, err)
 				app := NewAppender(1*time.Minute, wr, 100, func(s types.FileQueueStats) {

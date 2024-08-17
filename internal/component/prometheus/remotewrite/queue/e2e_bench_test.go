@@ -2,6 +2,12 @@ package queue
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"testing"
+	"time"
+
 	"github.com/grafana/alloy/internal/component"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 	"github.com/grafana/alloy/internal/runtime/logging"
@@ -9,11 +15,6 @@ import (
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/stretchr/testify/require"
-	"net/http"
-	"net/http/httptest"
-	"os"
-	"testing"
-	"time"
 )
 
 func BenchmarkE2E(b *testing.B) {
@@ -99,9 +100,9 @@ func newComponentBenchmark(t *testing.B, l *logging.Logger, url string, exp chan
 		Registerer: fakeRegistry{},
 		Tracer:     nil,
 	}, types.Arguments{
-		TTL:            2 * time.Hour,
-		BatchSizeBytes: 16 * 1024 * 1024,
-		FlushDuration:  1 * time.Second,
+		TTL:           2 * time.Hour,
+		MaxFlushSize:  16 * 1024 * 1024,
+		FlushDuration: 1 * time.Second,
 		Connections: []types.ConnectionConfig{{
 			Name:                    "test",
 			URL:                     url,

@@ -2,12 +2,13 @@ package queue
 
 import (
 	"context"
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/filequeue"
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/network"
-	"github.com/prometheus/client_golang/prometheus"
 	"path/filepath"
 	"reflect"
 	"sync"
+
+	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/filequeue"
+	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/network"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/go-kit/log"
 	"github.com/grafana/alloy/internal/component"
@@ -129,7 +130,7 @@ func (s *Queue) createEndpoints() error {
 		if err != nil {
 			return err
 		}
-		serial, err := cbor.NewSerializer(s.args.BatchSizeBytes, s.args.FlushDuration, fq, s.opts.Logger)
+		serial, err := cbor.NewSerializer(s.args.MaxFlushSize, s.args.FlushDuration, fq, s.opts.Logger)
 		if err != nil {
 			return err
 		}
