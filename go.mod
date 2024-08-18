@@ -640,7 +640,7 @@ require (
 	github.com/syndtr/gocapability v0.0.0-20200815063812-42c35b437635 // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go v1.0.162 // indirect
 	github.com/tg123/go-htpasswd v1.2.2 // indirect
-	github.com/tinylib/msgp v1.2.0 // indirect
+	github.com/tinylib/msgp v1.2.0
 	github.com/tklauser/go-sysconf v0.3.13 // indirect
 	github.com/tklauser/numcpus v0.7.0 // indirect
 	github.com/tomnomnom/linkheader v0.0.0-20180905144013-02ca5825eb80 // indirect
@@ -715,16 +715,9 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.1 // indirect
 )
 
-require (
-	github.com/fxamacker/cbor/v2 v2.7.0
-	github.com/vladopajic/go-actor v0.9.0
-	wellquite.org/bebop v0.0.0-20231113214845-2b238606656b
-)
+require github.com/vladopajic/go-actor v0.9.0
 
-require (
-	github.com/gammazero/deque v0.2.1 // indirect
-	github.com/x448/float16 v0.8.4 // indirect
-)
+require github.com/gammazero/deque v0.2.1 // indirect
 
 // NOTE: replace directives below must always be *temporary*.
 //
