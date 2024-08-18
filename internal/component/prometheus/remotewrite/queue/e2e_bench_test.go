@@ -17,7 +17,8 @@ import (
 )
 
 func BenchmarkE2E(b *testing.B) {
-	// Around 164k ops
+	// Around 100k ops if you look at profile roughly 20k are actual implementation with the rest being benchmark
+	// setup.
 	type e2eTest struct {
 		name   string
 		maker  func(index int, app storage.Appender)

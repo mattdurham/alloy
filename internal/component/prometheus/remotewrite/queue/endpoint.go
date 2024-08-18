@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	snappy "github.com/eapache/go-xerial-snappy"
@@ -25,7 +26,6 @@ type endpoint struct {
 	incoming   actor.Mailbox[types.DataHandle]
 	buf        []byte
 	self       actor.Actor
-	sg         *types.SeriesGroup
 }
 
 func NewEndpoint(client types.NetworkClient, serializer types.Serializer, stats, metatStats *types.PrometheusStats, ttl time.Duration, logger log.Logger) *endpoint {
@@ -38,7 +38,6 @@ func NewEndpoint(client types.NetworkClient, serializer types.Serializer, stats,
 		ttl:        ttl,
 		incoming:   actor.NewMailbox[types.DataHandle](),
 		buf:        make([]byte, 0, 1024),
-		sg:         &types.SeriesGroup{},
 	}
 }
 
@@ -73,15 +72,26 @@ func (ep *endpoint) DoWork(ctx actor.Context) actor.WorkerStatus {
 	}
 }
 
-func (ep *endpoint) deserializeAndSend(ctx context.Context, _ map[string]string, buf []byte) {
+func (ep *endpoint) deserializeAndSend(ctx context.Context, meta map[string]string, buf []byte) {
 	var err error
 	ep.buf, err = snappy.Decode(buf)
 	if err != nil {
 		level.Debug(ep.log).Log("msg", "error snappy decoding", "err", err)
 		return
 	}
-	var sg *types.SeriesGroup
-	sg, ep.buf, err = types.DeserializeToSeriesGroup(ep.sg, ep.buf)
+	seriesCount, _ := strconv.Atoi(meta["series_count"])
+	metaCount, _ := strconv.Atoi(meta["meta_count"])
+	stringsCount, _ := strconv.Atoi(meta["strings_count"])
+	sg := &types.SeriesGroup{
+		Series:   make([]*types.TimeSeriesBinary, seriesCount),
+		Metadata: make([]*types.MetaSeriesBinary, metaCount),
+		Strings:  make([]string, stringsCount),
+	}
+	for i := 0; i < seriesCount; i++ {
+		sg.Series[i] = types.GetTimeSeriesBinary()
+	}
+	sg, ep.buf, err = types.DeserializeToSeriesGroup(sg, ep.buf)
+
 	if err != nil {
 		level.Debug(ep.log).Log("msg", "error deserializing", "err", err)
 		return
@@ -95,7 +105,7 @@ func (ep *endpoint) deserializeAndSend(ctx context.Context, _ map[string]string,
 		if seriesAge > ep.ttl {
 			continue
 		}
-		sendErr := ep.network.SendSeries(ctx, series.Hash, types.BinaryToTimeSeries(series, sg.Strings))
+		sendErr := ep.network.SendSeries(ctx, series.Hash, series)
 		if sendErr != nil {
 			level.Error(ep.log).Log("msg", "error sending to write client", "err", sendErr)
 		}

@@ -27,8 +27,8 @@ var _ actor.Worker = (*loop)(nil)
 // TODO @mattdurham think about if we need to split loop into metadata loop
 type loop struct {
 	configMbx      actor.Mailbox[ConnectionConfig]
-	seriesMbx      actor.Mailbox[*types.TimeSeries]
-	metaSeriesMbx  actor.Mailbox[*types.MetaSeries]
+	seriesMbx      actor.Mailbox[*types.TimeSeriesBinary]
+	metaSeriesMbx  actor.Mailbox[*types.MetaSeriesBinary]
 	client         *http.Client
 	batchCount     int
 	flushTimer     time.Duration
@@ -39,7 +39,7 @@ type loop struct {
 	stopCh         chan struct{}
 	stopCalled     atomic.Bool
 	externalLabels map[string]string
-	series         []*types.TimeSeries
+	series         []*types.TimeSeriesBinary
 	self           actor.Actor
 	ticker         *time.Ticker
 	req            *prompb.WriteRequest
@@ -48,9 +48,9 @@ type loop struct {
 
 func newLoop(cc ConnectionConfig, log log.Logger, series func(s types.NetworkStats)) *loop {
 	l := &loop{
-		seriesMbx:      actor.NewMailbox[*types.TimeSeries](actor.OptCapacity(2 * cc.BatchCount)),
+		seriesMbx:      actor.NewMailbox[*types.TimeSeriesBinary](actor.OptCapacity(2 * cc.BatchCount)),
 		configMbx:      actor.NewMailbox[ConnectionConfig](),
-		metaSeriesMbx:  actor.NewMailbox[*types.MetaSeries](),
+		metaSeriesMbx:  actor.NewMailbox[*types.MetaSeriesBinary](),
 		batchCount:     cc.BatchCount,
 		flushTimer:     cc.FlushDuration,
 		client:         &http.Client{},
@@ -134,7 +134,7 @@ func (l *loop) DoWork(ctx actor.Context) actor.WorkerStatus {
 }
 
 // trySend is the core functionality for sending data to a endpoint. It will attempt retries as defined in MaxRetryBackoffAttempts.
-func (l *loop) trySend(series []*types.TimeSeries) {
+func (l *loop) trySend(series []*types.TimeSeriesBinary) {
 	attempts := 0
 	var data []byte
 attempt:
@@ -176,12 +176,12 @@ type sendResult struct {
 	data             []byte
 }
 
-func (l *loop) finishSending(series []*types.TimeSeries) {
-	types.PutTimeSeriesSlice(series)
+func (l *loop) finishSending(series []*types.TimeSeriesBinary) {
+	types.PutTimeSeriesBinarySlice(series)
 	l.lastSend = time.Now()
 }
 
-func (l *loop) send(series []*types.TimeSeries, retryCount int, data []byte) sendResult {
+func (l *loop) send(series []*types.TimeSeriesBinary, retryCount int, data []byte) sendResult {
 	result := sendResult{}
 	var err error
 	var buf []byte
@@ -268,7 +268,7 @@ func (l *loop) send(series []*types.TimeSeries, retryCount int, data []byte) sen
 	return result
 }
 
-func createWriteRequest(wr *prompb.WriteRequest, series []*types.TimeSeries, externalLabels map[string]string, data *proto.Buffer) ([]byte, error) {
+func createWriteRequest(wr *prompb.WriteRequest, series []*types.TimeSeriesBinary, externalLabels map[string]string, data *proto.Buffer) ([]byte, error) {
 	if cap(wr.Timeseries) < len(series) {
 		wr.Timeseries = make([]prompb.TimeSeries, len(series))
 	}
@@ -288,13 +288,13 @@ func createWriteRequest(wr *prompb.WriteRequest, series []*types.TimeSeries, ext
 		} else {
 			ts.Histograms = ts.Histograms[:0]
 		}
-		if tsBuf.Histogram != nil {
+		if tsBuf.Histograms.Histogram != nil {
 			ts.Histograms = ts.Histograms[:1]
-			ts.Histograms[0] = tsBuf.Histogram.ToPromHistogram()
+			ts.Histograms[0] = tsBuf.Histograms.Histogram.ToPromHistogram()
 		}
-		if tsBuf.FloatHistogram != nil {
+		if tsBuf.Histograms.FloatHistogram != nil {
 			ts.Histograms = ts.Histograms[:1]
-			ts.Histograms[0] = tsBuf.FloatHistogram.ToPromFloatHistogram()
+			ts.Histograms[0] = tsBuf.Histograms.FloatHistogram.ToPromFloatHistogram()
 		}
 
 		// Encode the external labels inside if needed.

@@ -1,6 +1,8 @@
 //go:generate msgp
 package types
 
+import "github.com/prometheus/prometheus/model/labels"
+
 type SeriesGroup struct {
 	Strings  []string
 	Series   []*TimeSeriesBinary
@@ -8,6 +10,8 @@ type SeriesGroup struct {
 }
 
 type TimeSeriesBinary struct {
+	// Labels are not serialized but are passed in.
+	Labels       labels.Labels `msg:"-"`
 	LabelsNames  []int32
 	LabelsValues []int32
 	TS           int64

@@ -38,17 +38,19 @@ func BenchmarkSerializer(b *testing.B) {
 		serial, _ := NewSerializer(10_000, 5*time.Second, &fakeFileQueue{}, logger)
 		serial.Start()
 		for j := 0; j < 100_000; j++ {
-			_ = serial.SendSeries(context.Background(), series)
+			for _, s := range series {
+				_ = serial.SendSeries(context.Background(), s)
+			}
 		}
 		serial.Stop()
 	}
 }
 
-func getTimeSeries(b *testing.B) []*types.TimeSeries {
+func getTimeSeries(b *testing.B) []*types.TimeSeriesBinary {
 	b.Helper()
-	series := make([]*types.TimeSeries, 0)
+	series := make([]*types.TimeSeriesBinary, 0)
 	for j := 0; j < 1_000; j++ {
-		timeseries := types.GetTimeSeries()
+		timeseries := types.GetTimeSeriesBinary()
 		timeseries.TS = time.Now().Unix()
 		timeseries.Value = rand.Float64()
 		timeseries.Labels = getLabels()
@@ -57,10 +59,10 @@ func getTimeSeries(b *testing.B) []*types.TimeSeries {
 	return series
 }
 
-func getLabels() []types.Label {
-	retLbls := make([]types.Label, 0)
+func getLabels() labels.Labels {
+	retLbls := make(labels.Labels, 0)
 	for i := 0; i < rand.Intn(20); i++ {
-		l := types.Label{
+		l := labels.Label{
 			Name:  fmt.Sprintf("label_%d", i),
 			Value: fmt.Sprintf("value_%d", i),
 		}
@@ -77,12 +79,12 @@ func (f *fakeSerializer) Start() {}
 
 func (f *fakeSerializer) Stop() {}
 
-func (f *fakeSerializer) SendSeries(ctx context.Context, data []*types.TimeSeries) error {
-	types.PutTimeSeriesSlice(data)
+func (f *fakeSerializer) SendSeries(ctx context.Context, data *types.TimeSeriesBinary) error {
+	types.PutTimeSeriesBinary(data)
 	return nil
 }
 
-func (f *fakeSerializer) SendMetadata(ctx context.Context, data []*types.MetaSeries) error {
+func (f *fakeSerializer) SendMetadata(ctx context.Context, data *types.MetaSeriesBinary) error {
 	return nil
 }
 

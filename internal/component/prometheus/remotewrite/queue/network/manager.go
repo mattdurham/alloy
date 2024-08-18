@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+
 	"github.com/grafana/alloy/internal/runtime/logging/level"
 
 	"github.com/go-kit/log"
@@ -62,14 +63,14 @@ func (s *manager) Start() {
 	s.self.Start()
 }
 
-func (s *manager) SendSeries(ctx context.Context, hash uint64, data *types.TimeSeries) error {
+func (s *manager) SendSeries(ctx context.Context, hash uint64, data *types.TimeSeriesBinary) error {
 	return s.inbox.Send(ctx, types.NetworkQueueItem{
 		Hash: hash,
 		TS:   data,
 	})
 }
 
-func (s *manager) SendMetadata(ctx context.Context, data *types.MetaSeries) error {
+func (s *manager) SendMetadata(ctx context.Context, data *types.MetaSeriesBinary) error {
 	return s.metaInbox.Send(ctx, types.NetworkMetadataItem{
 		TS: data,
 	})
@@ -131,13 +132,13 @@ func (s *manager) Stop() {
 }
 
 // Queue adds anything thats not metadata to the queue.
-func (s *manager) Queue(ctx context.Context, hash uint64, d *types.TimeSeries) {
+func (s *manager) Queue(ctx context.Context, hash uint64, d *types.TimeSeriesBinary) {
 	// Based on a hash which is the label hash add to the queue.
 	queueNum := hash % s.connectionCount
 	s.loops[queueNum].seriesMbx.Send(ctx, d)
 }
 
 // QueueMetadata adds metadata to the queue.
-func (s *manager) QueueMetadata(ctx context.Context, d *types.MetaSeries) {
+func (s *manager) QueueMetadata(ctx context.Context, d *types.MetaSeriesBinary) {
 	s.metadata.metaSeriesMbx.Send(ctx, d)
 }

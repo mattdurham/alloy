@@ -14,8 +14,8 @@ import (
 // serializer collects data from multiple appenders and will write them to file.Storage.
 // serializer will trigger based on the last flush duration OR if it hits a certain amount of items.
 type serializer struct {
-	inbox               actor.Mailbox[[]*types.TimeSeries]
-	metaInbox           actor.Mailbox[[]*types.MetaSeries]
+	inbox               actor.Mailbox[*types.TimeSeriesBinary]
+	metaInbox           actor.Mailbox[*types.MetaSeriesBinary]
 	maxItemsBeforeFlush int
 	flushDuration       time.Duration
 	queue               types.FileStorage
@@ -23,8 +23,8 @@ type serializer struct {
 	logger              log.Logger
 	self                actor.Actor
 	flushTestTimer      *time.Ticker
-	series              []*types.TimeSeries
-	meta                []*types.MetaSeries
+	series              []*types.TimeSeriesBinary
+	meta                []*types.MetaSeriesBinary
 	msgpBuffer          []byte
 }
 
@@ -33,17 +33,16 @@ func NewSerializer(maxItemsBeforeFlush int, flushDuration time.Duration, q types
 		maxItemsBeforeFlush: maxItemsBeforeFlush,
 		flushDuration:       flushDuration,
 		queue:               q,
-		series:              make([]*types.TimeSeries, 0),
+		series:              make([]*types.TimeSeriesBinary, 0),
 		logger:              l,
-		inbox:               actor.NewMailbox[[]*types.TimeSeries](),
-		metaInbox:           actor.NewMailbox[[]*types.MetaSeries](),
+		inbox:               actor.NewMailbox[*types.TimeSeriesBinary](),
+		metaInbox:           actor.NewMailbox[*types.MetaSeriesBinary](),
 		flushTestTimer:      time.NewTicker(1 * time.Second),
 		msgpBuffer:          make([]byte, 0),
 	}
 
 	return s, nil
 }
-
 func (s *serializer) Start() {
 	s.queue.Start()
 	s.self = actor.Combine(actor.New(s), s.inbox, s.metaInbox).Build()
@@ -55,11 +54,11 @@ func (s *serializer) Stop() {
 	s.self.Stop()
 }
 
-func (s *serializer) SendSeries(ctx context.Context, data []*types.TimeSeries) error {
+func (s *serializer) SendSeries(ctx context.Context, data *types.TimeSeriesBinary) error {
 	return s.inbox.Send(ctx, data)
 }
 
-func (s *serializer) SendMetadata(ctx context.Context, data []*types.MetaSeries) error {
+func (s *serializer) SendMetadata(ctx context.Context, data *types.MetaSeriesBinary) error {
 	return s.metaInbox.Send(ctx, data)
 }
 func (s *serializer) DoWork(ctx actor.Context) actor.WorkerStatus {
@@ -86,12 +85,9 @@ func (s *serializer) DoWork(ctx actor.Context) actor.WorkerStatus {
 	}
 }
 
-func (s *serializer) AppendMetadata(ctx actor.Context, data []*types.MetaSeries) error {
-	if len(data) == 0 {
-		return nil
-	}
+func (s *serializer) AppendMetadata(ctx actor.Context, data *types.MetaSeriesBinary) error {
 
-	s.meta = append(s.meta, data...)
+	s.meta = append(s.meta, data)
 	// If we would go over the max size then send, or if we have hit the flush duration then send.
 	if len(s.meta) >= s.maxItemsBeforeFlush {
 		return s.store(ctx)
@@ -101,12 +97,9 @@ func (s *serializer) AppendMetadata(ctx actor.Context, data []*types.MetaSeries)
 	return nil
 }
 
-func (s *serializer) Append(ctx actor.Context, data []*types.TimeSeries) error {
-	if len(data) == 0 {
-		return nil
-	}
+func (s *serializer) Append(ctx actor.Context, data *types.TimeSeriesBinary) error {
 
-	s.series = append(s.series, data...)
+	s.series = append(s.series, data)
 	// If we would go over the max size then send, or if we have hit the flush duration then send.
 	if len(s.series) >= s.maxItemsBeforeFlush {
 		return s.store(ctx)
@@ -126,20 +119,16 @@ func (s *serializer) store(ctx actor.Context) error {
 		Metadata: make([]*types.MetaSeriesBinary, len(s.meta)),
 	}
 	defer func() {
-		types.PutTimeSeriesSlice(s.series)
-		s.series = make([]*types.TimeSeries, 0)
+		types.PutTimeSeriesBinarySlice(s.series)
+		s.series = make([]*types.TimeSeriesBinary, 0)
 	}()
 
 	strMapToInt := make(map[string]int32)
 	index := int32(0)
-	defer func() {
-		types.PutTimeSeriesBinarySlice(group.Series)
-	}()
 
 	for si, ser := range s.series {
-		ts := types.GetTimeSeriesBinary()
-		index = fillBinary(ts, ser, strMapToInt, index)
-		group.Series[si] = ts
+		index = fillBinary(ser, strMapToInt, index)
+		group.Series[si] = ser
 	}
 	stringsSlice := make([]string, len(strMapToInt))
 	for k, v := range strMapToInt {
@@ -155,34 +144,29 @@ func (s *serializer) store(ctx actor.Context) error {
 	out := snappy.Encode(buf)
 	meta := map[string]string{
 		// product.signal_type.schema.version
-		"version":      "alloy.metrics.simple.v1",
-		"encoding":     "snappy",
-		"series_count": strconv.Itoa(len(group.Series)),
-		"meta_count":   strconv.Itoa(len(group.Metadata)),
+		"version":       "alloy.metrics.simple.v1",
+		"encoding":      "snappy",
+		"series_count":  strconv.Itoa(len(group.Series)),
+		"meta_count":    strconv.Itoa(len(group.Metadata)),
+		"strings_count": strconv.Itoa(len(group.Strings)),
 	}
 	err = s.queue.Send(ctx, meta, out)
 	return err
 }
 
-func fillBinary(ts *types.TimeSeriesBinary, ser *types.TimeSeries, strMapToInt map[string]int32, index int32) int32 {
-	if cap(ts.LabelsNames) < len(ser.Labels) {
-		ts.LabelsNames = make([]int32, len(ser.Labels))
+func fillBinary(ts *types.TimeSeriesBinary, strMapToInt map[string]int32, index int32) int32 {
+	if cap(ts.LabelsNames) < len(ts.Labels) {
+		ts.LabelsNames = make([]int32, len(ts.Labels))
 	} else {
-		ts.LabelsNames = ts.LabelsNames[:len(ser.Labels)]
+		ts.LabelsNames = ts.LabelsNames[:len(ts.Labels)]
 	}
-	if cap(ts.LabelsValues) < len(ser.Labels) {
-		ts.LabelsValues = make([]int32, len(ser.Labels))
+	if cap(ts.LabelsValues) < len(ts.Labels) {
+		ts.LabelsValues = make([]int32, len(ts.Labels))
 	} else {
-		ts.LabelsValues = ts.LabelsValues[:len(ser.Labels)]
+		ts.LabelsValues = ts.LabelsValues[:len(ts.Labels)]
 	}
-	ts.TS = ser.TS
-	ts.Value = ser.Value
-	ts.Hash = ser.Hash
 
-	ts.Histograms.Histogram = ser.Histogram
-	ts.Histograms.FloatHistogram = ser.FloatHistogram
-
-	for i, v := range ser.Labels {
+	for i, v := range ts.Labels {
 		val, found := strMapToInt[v.Name]
 		if !found {
 			strMapToInt[v.Name] = index

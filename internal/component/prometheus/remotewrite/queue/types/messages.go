@@ -9,11 +9,11 @@ type QueueItem struct {
 
 type NetworkQueueItem struct {
 	Hash uint64
-	TS   *TimeSeries
+	TS   *TimeSeriesBinary
 }
 
 type NetworkMetadataItem struct {
-	TS *MetaSeries
+	TS *MetaSeriesBinary
 }
 
 type Data struct {

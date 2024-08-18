@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/prometheus/prometheus/model/labels"
 	"go.uber.org/atomic"
 )
 
@@ -16,8 +17,8 @@ type FileStorage interface {
 type Serializer interface {
 	Start()
 	Stop()
-	SendSeries(ctx context.Context, data []*TimeSeries) error
-	SendMetadata(ctx context.Context, data []*MetaSeries) error
+	SendSeries(ctx context.Context, data *TimeSeriesBinary) error
+	SendMetadata(ctx context.Context, data *MetaSeriesBinary) error
 }
 
 var tsBinaryPool = sync.Pool{
@@ -60,27 +61,22 @@ func PutTimeSeriesBinary(ts *TimeSeriesBinary) {
 	tsBinaryPool.Put(ts)
 }
 
-func BinaryToTimeSeries(bin *TimeSeriesBinary, items []string) *TimeSeries {
-	ts := GetTimeSeries()
-	ts.TS = bin.TS
-	ts.Hash = bin.Hash
-	ts.Histogram = bin.Histograms.Histogram
-	ts.FloatHistogram = bin.Histograms.FloatHistogram
-	ts.Value = bin.Value
-	if cap(ts.Labels) < len(bin.LabelsValues) {
-		ts.Labels = make([]Label, len(bin.LabelsValues))
-	} else {
-		ts.Labels = ts.Labels[:len(bin.LabelsValues)]
-	}
-
-	for i := 0; i < len(bin.LabelsNames); i++ {
-		ts.Labels[i].Name = items[bin.LabelsNames[i]]
-		ts.Labels[i].Value = items[bin.LabelsValues[i]]
-	}
-	return ts
-}
-
 func DeserializeToSeriesGroup(sg *SeriesGroup, buf []byte) (*SeriesGroup, []byte, error) {
 	buffer, err := sg.UnmarshalMsg(buf)
+	// Need to fill in the labels.
+	for _, series := range sg.Series {
+		if cap(series.Labels) < len(series.LabelsNames) {
+			series.Labels = make(labels.Labels, len(series.LabelsNames))
+		} else {
+			series.Labels = series.Labels[:len(series.LabelsNames)]
+		}
+		for i := range series.LabelsNames {
+			series.Labels[i] = labels.Label{
+				Name:  sg.Strings[series.LabelsNames[i]],
+				Value: sg.Strings[series.LabelsValues[i]],
+			}
+		}
+	}
+	sg.Strings = sg.Strings[:0]
 	return sg, buffer, err
 }
