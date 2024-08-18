@@ -9,11 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/grafana/alloy/internal/runtime/logging/level"
-
-	"github.com/fxamacker/cbor/v2"
 	"github.com/go-kit/log"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
+	"github.com/grafana/alloy/internal/runtime/logging/level"
 	"github.com/vladopajic/go-actor/actor"
 )
 
@@ -49,12 +47,6 @@ func (q *queue) Start() {
 
 func (q *queue) Stop() {
 	q.self.Stop()
-}
-
-// Record wraps the input data and combines it with the metadata.
-type Record struct {
-	Meta map[string]string
-	Data []byte
 }
 
 // NewQueue returns a implementation of FileStorage.
@@ -115,7 +107,7 @@ func get(name string) (map[string]string, []byte, error) {
 		return nil, nil, err
 	}
 	r := &Record{}
-	err = cbor.Unmarshal(buf, r)
+	_, err = r.UnmarshalMsg(buf)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -157,7 +149,7 @@ func (q *queue) add(meta map[string]string, data []byte) (string, error) {
 		Meta: meta,
 		Data: data,
 	}
-	rBuf, err := cbor.Marshal(r)
+	rBuf, err := r.MarshalMsg(nil)
 	if err != nil {
 		return "", err
 	}

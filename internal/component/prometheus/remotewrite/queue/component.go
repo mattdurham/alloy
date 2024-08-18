@@ -12,7 +12,7 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/grafana/alloy/internal/component"
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/cbor"
+	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/serialization"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 	"github.com/grafana/alloy/internal/featuregate"
 	"github.com/prometheus/prometheus/storage"
@@ -130,7 +130,7 @@ func (s *Queue) createEndpoints() error {
 		if err != nil {
 			return err
 		}
-		serial, err := cbor.NewSerializer(s.args.MaxFlushSize, s.args.FlushDuration, fq, s.opts.Logger)
+		serial, err := serialization.NewSerializer(s.args.MaxFlushSize, s.args.FlushDuration, fq, s.opts.Logger)
 		if err != nil {
 			return err
 		}
@@ -150,7 +150,7 @@ func (c *Queue) Appender(ctx context.Context) storage.Appender {
 
 	children := make([]storage.Appender, 0)
 	for _, ep := range c.endpoints {
-		children = append(children, cbor.NewAppender(c.args.TTL, ep.serializer, c.args.AppenderBatchSize, ep.stat.UpdateFileQueue, c.opts.Logger))
+		children = append(children, serialization.NewAppender(c.args.TTL, ep.serializer, c.args.AppenderBatchSize, ep.stat.UpdateFileQueue, c.opts.Logger))
 	}
 	return &fanout{children: children}
 }

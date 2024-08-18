@@ -1,7 +1,11 @@
 //go:generate msgp
 package types
 
-import "github.com/prometheus/prometheus/model/labels"
+import (
+	"github.com/prometheus/prometheus/model/histogram"
+	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/prompb"
+)
 
 type SeriesGroup struct {
 	Strings  []string
@@ -81,4 +85,93 @@ type HistogramZeroCount struct {
 type BucketSpan struct {
 	Offset int32
 	Length uint32
+}
+
+func (h *Histogram) ToPromHistogram() prompb.Histogram {
+	return prompb.Histogram{
+		Count:          &prompb.Histogram_CountInt{CountInt: h.Count.IntValue},
+		Sum:            h.Sum,
+		Schema:         h.Schema,
+		ZeroThreshold:  h.ZeroThreshold,
+		ZeroCount:      &prompb.Histogram_ZeroCountInt{ZeroCountInt: h.ZeroCount.IntValue},
+		NegativeSpans:  ToPromBucketSpans(h.NegativeSpans),
+		NegativeDeltas: h.NegativeBuckets,
+		NegativeCounts: h.NegativeCounts,
+		PositiveSpans:  ToPromBucketSpans(h.PositiveSpans),
+		PositiveDeltas: h.PositiveBuckets,
+		PositiveCounts: h.NegativeCounts,
+		ResetHint:      prompb.Histogram_ResetHint(h.ResetHint),
+		Timestamp:      h.TimestampMillisecond,
+	}
+}
+
+func (h *FloatHistogram) ToPromFloatHistogram() prompb.Histogram {
+	return prompb.Histogram{
+		Count:          &prompb.Histogram_CountFloat{CountFloat: h.Count.FloatValue},
+		Sum:            h.Sum,
+		Schema:         h.Schema,
+		ZeroThreshold:  h.ZeroThreshold,
+		ZeroCount:      &prompb.Histogram_ZeroCountFloat{ZeroCountFloat: h.ZeroCount.FloatValue},
+		NegativeSpans:  ToPromBucketSpans(h.NegativeSpans),
+		NegativeDeltas: h.NegativeDeltas,
+		NegativeCounts: h.NegativeCounts,
+		PositiveSpans:  ToPromBucketSpans(h.PositiveSpans),
+		PositiveDeltas: h.PositiveDeltas,
+		PositiveCounts: h.PositiveCounts,
+		ResetHint:      prompb.Histogram_ResetHint(h.ResetHint),
+		Timestamp:      h.TimestampMillisecond,
+	}
+}
+func ToPromBucketSpans(bss []BucketSpan) []prompb.BucketSpan {
+	spans := make([]prompb.BucketSpan, len(bss))
+	for i, bs := range bss {
+		spans[i] = bs.ToPromBucketSpan()
+	}
+	return spans
+}
+
+func (bs *BucketSpan) ToPromBucketSpan() prompb.BucketSpan {
+	return prompb.BucketSpan{
+		Offset: bs.Offset,
+		Length: bs.Length,
+	}
+}
+
+func (ts *TimeSeriesBinary) FromHistogram(timestamp int64, h *histogram.Histogram) {
+	ts.Histograms.Histogram = &Histogram{
+		Count:                HistogramCount{IsInt: true, IntValue: h.Count},
+		Sum:                  h.Sum,
+		Schema:               h.Schema,
+		ZeroThreshold:        h.ZeroThreshold,
+		ZeroCount:            HistogramZeroCount{IsInt: true, IntValue: h.ZeroCount},
+		NegativeSpans:        FromPromSpan(h.NegativeSpans),
+		NegativeBuckets:      h.NegativeBuckets,
+		PositiveSpans:        FromPromSpan(h.PositiveSpans),
+		PositiveBuckets:      h.PositiveBuckets,
+		ResetHint:            int32(h.CounterResetHint),
+		TimestampMillisecond: timestamp,
+	}
+}
+func (ts *TimeSeriesBinary) FromFloatHistogram(timestamp int64, h *histogram.FloatHistogram) {
+	ts.Histograms.FloatHistogram = &FloatHistogram{
+		Count:                HistogramCount{IsInt: false, FloatValue: h.Count},
+		Sum:                  h.Sum,
+		Schema:               h.Schema,
+		ZeroThreshold:        h.ZeroThreshold,
+		ZeroCount:            HistogramZeroCount{IsInt: false, FloatValue: h.ZeroCount},
+		NegativeSpans:        FromPromSpan(h.NegativeSpans),
+		NegativeCounts:       h.NegativeBuckets,
+		PositiveSpans:        FromPromSpan(h.PositiveSpans),
+		PositiveCounts:       h.PositiveBuckets,
+		ResetHint:            int32(h.CounterResetHint),
+		TimestampMillisecond: timestamp,
+	}
+}
+func FromPromSpan(spans []histogram.Span) []BucketSpan {
+	bs := make([]BucketSpan, len(spans))
+	for i, s := range spans {
+		bs[i].Offset = s.Offset
+		bs[i].Length = s.Length
+	}
+	return bs
 }

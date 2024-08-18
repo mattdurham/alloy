@@ -1,4 +1,4 @@
-package cbor
+package serialization
 
 /*
 Test
