@@ -79,6 +79,15 @@ func (ep *endpoint) deserializeAndSend(ctx context.Context, meta map[string]stri
 		level.Debug(ep.log).Log("msg", "error snappy decoding", "err", err)
 		return
 	}
+	version, ok := meta["version"]
+	if !ok {
+		level.Error(ep.log).Log("msg", "version not found for deserialization")
+		return
+	}
+	if version != "alloy.metrics.queue.v1" {
+		level.Error(ep.log).Log("msg", "invalid version found for deserialization", "version", version)
+		return
+	}
 	seriesCount, _ := strconv.Atoi(meta["series_count"])
 	metaCount, _ := strconv.Atoi(meta["meta_count"])
 	stringsCount, _ := strconv.Atoi(meta["strings_count"])

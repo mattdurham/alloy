@@ -10,10 +10,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/golang/protobuf/proto"
-
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/golang/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 	"github.com/prometheus/prometheus/prompb"
@@ -36,7 +35,6 @@ type loop struct {
 	log            log.Logger
 	lastSend       time.Time
 	statsFunc      func(s types.NetworkStats)
-	stopCh         chan struct{}
 	stopCalled     atomic.Bool
 	externalLabels map[string]string
 	series         []*types.TimeSeriesBinary
@@ -94,33 +92,41 @@ func (l *loop) DoWork(ctx actor.Context) actor.WorkerStatus {
 	case <-ctx.Done():
 		l.stopCalled.Store(true)
 		return actor.WorkerEnd
-	case cc := <-l.configMbx.ReceiveC():
+	case cc, ok := <-l.configMbx.ReceiveC():
+		if !ok {
+			return actor.WorkerEnd
+		}
 		l.cfg = cc
 		return actor.WorkerContinue
 	default:
 	}
-	// Timer is to check the flush.
+	// Main select loop
 	select {
 	case <-ctx.Done():
 		l.stopCalled.Store(true)
 		return actor.WorkerEnd
-	case cc := <-l.configMbx.ReceiveC():
+	case cc, ok := <-l.configMbx.ReceiveC():
+		if !ok {
+			return actor.WorkerEnd
+		}
 		l.cfg = cc
 		return actor.WorkerContinue
+	// Ticker is to ensure the flush timer is called.
 	case <-l.ticker.C:
 		if len(l.series) == 0 {
 			return actor.WorkerContinue
 		}
 		if time.Since(l.lastSend) > l.flushTimer {
-			l.trySend(l.series)
-			l.series = l.series[:0]
+			l.trySend()
 		}
 		return actor.WorkerContinue
-	case buf := <-l.seriesMbx.ReceiveC():
-		l.series = append(l.series, buf)
+	case series, ok := <-l.seriesMbx.ReceiveC():
+		if !ok {
+			return actor.WorkerEnd
+		}
+		l.series = append(l.series, series)
 		if len(l.series) >= l.batchCount {
-			l.trySend(l.series)
-			l.series = l.series[:0]
+			l.trySend()
 		}
 		return actor.WorkerContinue
 	case <-l.metaSeriesMbx.ReceiveC():
@@ -134,29 +140,29 @@ func (l *loop) DoWork(ctx actor.Context) actor.WorkerStatus {
 }
 
 // trySend is the core functionality for sending data to a endpoint. It will attempt retries as defined in MaxRetryBackoffAttempts.
-func (l *loop) trySend(series []*types.TimeSeriesBinary) {
+func (l *loop) trySend() {
 	attempts := 0
 	var data []byte
 attempt:
 	start := time.Now()
-	result := l.send(series, attempts, data)
+	result := l.send(attempts, data)
 	data = result.data
 	duration := time.Since(start)
 	l.statsFunc(types.NetworkStats{
 		SendDuration: duration,
 	})
 	if result.successful {
-		l.finishSending(series)
+		l.finishSending()
 		return
 	}
 	if !result.recoverableError {
-		l.finishSending(series)
+		l.finishSending()
 		return
 	}
 	attempts++
 	if attempts > int(l.cfg.MaxRetryBackoffAttempts) && l.cfg.MaxRetryBackoffAttempts > 0 {
 		level.Debug(l.log).Log("msg", "max attempts reached", "attempts", attempts)
-		l.finishSending(series)
+		l.finishSending()
 		return
 	}
 	l.statsFunc(types.NetworkStats{
@@ -176,24 +182,26 @@ type sendResult struct {
 	data             []byte
 }
 
-func (l *loop) finishSending(series []*types.TimeSeriesBinary) {
-	types.PutTimeSeriesBinarySlice(series)
+func (l *loop) finishSending() {
+	types.PutTimeSeriesBinarySlice(l.series)
+	l.series = make([]*types.TimeSeriesBinary, 0, l.batchCount)
 	l.lastSend = time.Now()
 }
 
-func (l *loop) send(series []*types.TimeSeriesBinary, retryCount int, data []byte) sendResult {
+func (l *loop) send(retryCount int, data []byte) sendResult {
 	result := sendResult{}
 	var err error
 	var buf []byte
 	// Check to see if this is a retry and we can reuse the buffer.
 	if len(data) == 0 {
-		data, err = createWriteRequest(l.req, series, l.externalLabels, l.buf)
+		data, err = createWriteRequest(l.req, l.series, l.externalLabels, l.buf)
 		if err != nil {
 			result.err = err
 			return result
 		}
 		buf = snappy.Encode(buf, data)
 	} else {
+		// Its a retry
 		buf = data
 	}
 
@@ -254,13 +262,13 @@ func (l *loop) send(series []*types.TimeSeriesBinary, retryCount int, data []byt
 
 	// Find the newest
 	var newestTS int64
-	for _, ts := range series {
+	for _, ts := range l.series {
 		if ts.TS > newestTS {
 			newestTS = ts.TS
 		}
 	}
 	l.statsFunc(types.NetworkStats{
-		SeriesSent:      len(series),
+		SeriesSent:      len(l.series),
 		NewestTimestamp: newestTS,
 	})
 
@@ -297,12 +305,16 @@ func createWriteRequest(wr *prompb.WriteRequest, series []*types.TimeSeriesBinar
 			ts.Histograms[0] = tsBuf.Histograms.FloatHistogram.ToPromFloatHistogram()
 		}
 
+		if tsBuf.Histograms.Histogram == nil && tsBuf.Histograms.FloatHistogram == nil {
+			ts.Histograms = ts.Histograms[:0]
+		}
+
 		// Encode the external labels inside if needed.
 		for k, v := range externalLabels {
 			found := false
-			for _, lbl := range ts.Labels {
+			for j, lbl := range ts.Labels {
 				if lbl.Name == k {
-					lbl.Value = v
+					ts.Labels[j].Value = v
 					found = true
 					break
 				}

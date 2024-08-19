@@ -34,14 +34,6 @@ func GetTimeSeriesBinary() *TimeSeriesBinary {
 
 var OutStandingTimeSeriesBinary = atomic.Int32{}
 
-func GetTimeSeriesBinarySlice(n int) []*TimeSeriesBinary {
-	tss := make([]*TimeSeriesBinary, 0, n)
-	for i := 0; i < n; i++ {
-		tss = append(tss, GetTimeSeriesBinary())
-	}
-	return tss
-}
-
 func PutTimeSeriesBinarySlice(tss []*TimeSeriesBinary) {
 	for i := 0; i < len(tss); i++ {
 		PutTimeSeriesBinary(tss[i])
@@ -53,6 +45,7 @@ func PutTimeSeriesBinary(ts *TimeSeriesBinary) {
 	OutStandingTimeSeriesBinary.Dec()
 	ts.LabelsNames = ts.LabelsNames[:0]
 	ts.LabelsValues = ts.LabelsValues[:0]
+	ts.Labels = nil
 	ts.TS = 0
 	ts.Value = 0
 	ts.Hash = 0

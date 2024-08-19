@@ -2,12 +2,13 @@ package filequeue
 
 import (
 	"context"
+	"testing"
+	"time"
+
 	"github.com/go-kit/log"
 	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
 	"github.com/stretchr/testify/require"
 	"github.com/vladopajic/go-actor/actor"
-	"testing"
-	"time"
 )
 
 func BenchmarkFileQueue(t *testing.B) {
@@ -44,10 +45,6 @@ func BenchmarkFileQueue(t *testing.B) {
 }
 
 func getHandleBench(mbx actor.MailboxReceiver[types.DataHandle]) (map[string]string, []byte, error) {
-	select {
-
-	case item, _ := <-mbx.ReceiveC():
-		return item.Get()
-	}
-
+	item := <-mbx.ReceiveC()
+	return item.Get()
 }

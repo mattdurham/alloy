@@ -39,6 +39,7 @@ func NewSerializer(maxItemsBeforeFlush int, flushDuration time.Duration, q types
 		metaInbox:           actor.NewMailbox[*types.MetaSeriesBinary](),
 		flushTestTimer:      time.NewTicker(1 * time.Second),
 		msgpBuffer:          make([]byte, 0),
+		lastFlush:           time.Now(),
 	}
 
 	return s, nil
@@ -144,7 +145,7 @@ func (s *serializer) store(ctx actor.Context) error {
 	out := snappy.Encode(buf)
 	meta := map[string]string{
 		// product.signal_type.schema.version
-		"version":       "alloy.metrics.simple.v1",
+		"version":       "alloy.metrics.queue.v1",
 		"encoding":      "snappy",
 		"series_count":  strconv.Itoa(len(group.Series)),
 		"meta_count":    strconv.Itoa(len(group.Metadata)),
