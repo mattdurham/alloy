@@ -27,37 +27,45 @@ type test struct {
 }
 
 var tests = []test{
-	{
+	/*{
 		name:        "1_000",
 		metricCount: 1_000,
-	}, /*
-		{
-			name:        "10_000",
-			metricCount: 10_000,
-		},
-		{
-			name:        "100_000",
-			metricCount: 100_000,
-		},
-		{
-			name:        "500_000",
-			metricCount: 500_000,
-		},
-		{
-			name:        "1_000_000",
-			metricCount: 1_000_000,
-		},*/
+	},
+	{
+		name:        "10_000",
+		metricCount: 10_000,
+	},
+	{
+		name:        "100_000",
+		metricCount: 100_000,
+	},
+	{
+		name:        "500_000",
+		metricCount: 500_000,
+	},*/
+	{
+		name:        "1_000_000",
+		metricCount: 1_000_000,
+	},
 }
 
-func BenchmarkSimpleCbor(b *testing.B) {
+func BenchmarkSimple(b *testing.B) {
 	for _, t := range tests {
 		b.Run(t.name, func(b *testing.B) {
-			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
+			for n := 0; n < b.N; n++ {
+				b.ReportAllocs()
+				totalBytes := 0
+				totalMemory := 0
+				var m1, m2 runtime.MemStats
+				runtime.GC()
+				runtime.ReadMemStats(&m1)
 				q := &fq{}
 				l := log2.NewNopLogger()
-				wr, err := NewSerializer(100_000, 500*time.Millisecond, q, l)
+				wr, err := NewSerializer(16*1024*1024, 500*time.Millisecond, q, l)
 				wr.Start()
+				b.Cleanup(func() {
+					wr.Stop()
+				})
 				require.NoError(b, err)
 				app := NewAppender(1*time.Minute, wr, 100, func(s types.FileQueueStats) {
 				}, l)
@@ -82,8 +90,14 @@ func BenchmarkSimpleCbor(b *testing.B) {
 					require.NoError(b, err)
 				}
 				_ = app.Commit()
-				wr.Stop()
+				totalBytes += q.totalBytes
+				runtime.ReadMemStats(&m2)
+				totalMemory = int(m2.HeapInuse - m1.HeapInuse)
+
+				b.Log("bytes written", humanize.Bytes(uint64(totalBytes)))
+				b.Log("memory used per run", humanize.Bytes(uint64(totalMemory)))
 			}
+
 		})
 	}
 
@@ -92,9 +106,10 @@ func BenchmarkSimpleCbor(b *testing.B) {
 func BenchmarkTSDB(b *testing.B) {
 	for _, t := range tests {
 		b.Run(t.name, func(b *testing.B) {
-			totalBytes := 0
-			totalMemory := 0
-			for i := 0; i < b.N; i++ {
+			for n := 0; n < b.N; n++ {
+				b.ReportAllocs()
+				totalBytes := 0
+				totalMemory := 0
 				var m1, m2 runtime.MemStats
 				runtime.GC()
 				runtime.ReadMemStats(&m1)
@@ -135,10 +150,10 @@ func BenchmarkTSDB(b *testing.B) {
 				})
 				runtime.ReadMemStats(&m2)
 				totalMemory = int(m2.HeapInuse - m1.HeapInuse)
+
+				b.Log("bytes written", humanize.Bytes(uint64(totalBytes)))
+				b.Log("memory used per run", humanize.Bytes(uint64(totalMemory)))
 			}
-			b.Log("bytes written", humanize.Bytes(uint64(totalBytes)))
-			b.Log("bytes written per run", humanize.Bytes(uint64(totalBytes/b.N)), "metric count", t.metricCount)
-			b.Log("memory used per run", humanize.Bytes(uint64(totalMemory/b.N)))
 		})
 	}
 }
