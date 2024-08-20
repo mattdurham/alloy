@@ -78,6 +78,9 @@ func (ep *endpoint) deserializeAndSend(ctx context.Context, meta map[string]stri
 		level.Debug(ep.log).Log("msg", "error snappy decoding", "err", err)
 		return
 	}
+	// The version of each file is in the metadata. Right now there is only one version
+	// supported but in the future the ability to support more. Along with different
+	// compression.
 	version, ok := meta["version"]
 	if !ok {
 		level.Error(ep.log).Log("msg", "version not found for deserialization")
@@ -87,6 +90,7 @@ func (ep *endpoint) deserializeAndSend(ctx context.Context, meta map[string]stri
 		level.Error(ep.log).Log("msg", "invalid version found for deserialization", "version", version)
 		return
 	}
+	// Grab the amounts of each type and we can go ahead and alloc the space.
 	seriesCount, _ := strconv.Atoi(meta["series_count"])
 	metaCount, _ := strconv.Atoi(meta["meta_count"])
 	stringsCount, _ := strconv.Atoi(meta["strings_count"])

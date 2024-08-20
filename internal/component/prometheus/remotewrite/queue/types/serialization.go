@@ -7,6 +7,10 @@ import (
 	"github.com/prometheus/prometheus/prompb"
 )
 
+// SeriesGroup is the holder for TimeSeries, Metadata, and the strings array.
+// When serialized the Labels Key,Value array will be transformed into
+// LabelNames and LabelsValues that point to the index in Strings.
+// This deduplicates the strings and decreases the size on disk.
 type SeriesGroup struct {
 	Strings  []string
 	Series   []*TimeSeriesBinary
@@ -172,18 +176,13 @@ func FromPromSpan(spans []histogram.Span) []BucketSpan {
 	return bs
 }
 
+// FillBinary is what does the conversion from labels.Labels to LabelNames and
+// LabelValues while filling in the string map, that is later converted to []string.
 func FillBinary(ts *TimeSeriesBinary, strMapToInt map[string]int32, index int32) int32 {
-	if cap(ts.LabelsNames) < len(ts.Labels) {
-		ts.LabelsNames = make([]int32, len(ts.Labels))
-	} else {
-		ts.LabelsNames = ts.LabelsNames[:len(ts.Labels)]
-	}
-	if cap(ts.LabelsValues) < len(ts.Labels) {
-		ts.LabelsValues = make([]int32, len(ts.Labels))
-	} else {
-		ts.LabelsValues = ts.LabelsValues[:len(ts.Labels)]
-	}
+	ts.LabelsNames = alignArray(ts.LabelsNames, len(ts.Labels))
+	ts.LabelsValues = alignArray(ts.LabelsValues, len(ts.Labels))
 
+	// This is where we deduplicate the ts.Labels into int32 values.
 	for i, v := range ts.Labels {
 		val, found := strMapToInt[v.Name]
 		if !found {
@@ -202,5 +201,13 @@ func FillBinary(ts *TimeSeriesBinary, strMapToInt map[string]int32, index int32)
 		ts.LabelsValues[i] = val
 	}
 	return index
+}
 
+func alignArray(lbls []int32, length int) []int32 {
+	if cap(lbls) < length {
+		lbls = make([]int32, length)
+	} else {
+		lbls = lbls[:length]
+	}
+	return lbls
 }
