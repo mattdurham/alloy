@@ -21,7 +21,6 @@ type endpoint struct {
 	stat       *types.PrometheusStats
 	metaStats  *types.PrometheusStats
 	log        log.Logger
-	ctx        context.Context
 	ttl        time.Duration
 	incoming   actor.Mailbox[types.DataHandle]
 	buf        []byte

@@ -135,10 +135,10 @@ func (s *manager) Stop() {
 func (s *manager) Queue(ctx context.Context, hash uint64, d *types.TimeSeriesBinary) {
 	// Based on a hash which is the label hash add to the queue.
 	queueNum := hash % s.connectionCount
-	s.loops[queueNum].seriesMbx.Send(ctx, d)
+	_ = s.loops[queueNum].seriesMbx.Send(ctx, d)
 }
 
 // QueueMetadata adds metadata to the queue.
 func (s *manager) QueueMetadata(ctx context.Context, d *types.MetaSeriesBinary) {
-	s.metadata.metaSeriesMbx.Send(ctx, d)
+	_ = s.metadata.metaSeriesMbx.Send(ctx, d)
 }

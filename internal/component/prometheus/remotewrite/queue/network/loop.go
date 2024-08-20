@@ -42,6 +42,7 @@ type loop struct {
 	ticker         *time.Ticker
 	req            *prompb.WriteRequest
 	buf            *proto.Buffer
+	sendBuffer     []byte
 }
 
 func newLoop(cc ConnectionConfig, log log.Logger, series func(s types.NetworkStats)) *loop {
@@ -58,6 +59,7 @@ func newLoop(cc ConnectionConfig, log log.Logger, series func(s types.NetworkSta
 		externalLabels: cc.ExternalLabels,
 		ticker:         time.NewTicker(1 * time.Second),
 		buf:            proto.NewBuffer(nil),
+		sendBuffer:     make([]byte, 0),
 	}
 	l.req = &prompb.WriteRequest{
 		// We know BatchCount is the most we will ever send.
@@ -142,11 +144,9 @@ func (l *loop) DoWork(ctx actor.Context) actor.WorkerStatus {
 // trySend is the core functionality for sending data to a endpoint. It will attempt retries as defined in MaxRetryBackoffAttempts.
 func (l *loop) trySend() {
 	attempts := 0
-	var data []byte
 attempt:
 	start := time.Now()
-	result := l.send(attempts, data)
-	data = result.data
+	result := l.send(attempts)
 	duration := time.Since(start)
 	l.statsFunc(types.NetworkStats{
 		SendDuration: duration,
@@ -161,13 +161,10 @@ attempt:
 	}
 	attempts++
 	if attempts > int(l.cfg.MaxRetryBackoffAttempts) && l.cfg.MaxRetryBackoffAttempts > 0 {
-		level.Debug(l.log).Log("msg", "max attempts reached", "attempts", attempts)
+		level.Debug(l.log).Log("msg", "max retry attempts reached", "attempts", attempts)
 		l.finishSending()
 		return
 	}
-	l.statsFunc(types.NetworkStats{
-		Retries: 1,
-	})
 	if l.stopCalled.Load() {
 		return
 	}
@@ -179,34 +176,30 @@ type sendResult struct {
 	successful       bool
 	recoverableError bool
 	retryAfter       time.Duration
-	data             []byte
 }
 
 func (l *loop) finishSending() {
 	types.PutTimeSeriesBinarySlice(l.series)
+	l.sendBuffer = l.sendBuffer[:0]
 	l.series = make([]*types.TimeSeriesBinary, 0, l.batchCount)
 	l.lastSend = time.Now()
 }
 
-func (l *loop) send(retryCount int, data []byte) sendResult {
+func (l *loop) send(retryCount int) sendResult {
+	// TODO @mattdurham fill in all the various stat functions.
 	result := sendResult{}
 	var err error
-	var buf []byte
 	// Check to see if this is a retry and we can reuse the buffer.
-	if len(data) == 0 {
-		data, err = createWriteRequest(l.req, l.series, l.externalLabels, l.buf)
+	if len(l.sendBuffer) == 0 {
+		data, err := createWriteRequest(l.req, l.series, l.externalLabels, l.buf)
 		if err != nil {
 			result.err = err
 			return result
 		}
-		buf = snappy.Encode(buf, data)
-	} else {
-		// Its a retry
-		buf = data
+		l.sendBuffer = snappy.Encode(l.sendBuffer, data)
 	}
 
-	result.data = buf
-	httpReq, err := http.NewRequest("POST", l.cfg.URL, bytes.NewReader(buf))
+	httpReq, err := http.NewRequest("POST", l.cfg.URL, bytes.NewReader(l.sendBuffer))
 	if err != nil {
 		result.err = err
 		return result
@@ -234,13 +227,9 @@ func (l *loop) send(retryCount int, data []byte) sendResult {
 	// 500 errors are considered recoverable.
 	if resp.StatusCode/100 == 5 || resp.StatusCode == http.StatusTooManyRequests {
 		if resp.StatusCode == http.StatusTooManyRequests {
-			l.statsFunc(types.NetworkStats{
-				Retries429: 1,
-			})
+			l.statsFunc(types.NetworkStats{})
 		} else {
-			l.statsFunc(types.NetworkStats{
-				Retries5XX: 1,
-			})
+			l.statsFunc(types.NetworkStats{})
 		}
 		result.retryAfter = retryAfterDuration(resp.Header.Get("Retry-After"))
 		result.recoverableError = true
@@ -253,9 +242,7 @@ func (l *loop) send(retryCount int, data []byte) sendResult {
 		if scanner.Scan() {
 			line = scanner.Text()
 		}
-		l.statsFunc(types.NetworkStats{
-			Fails: 1,
-		})
+		l.statsFunc(types.NetworkStats{})
 		result.err = fmt.Errorf("server returned HTTP status %s: %s", resp.Status, line)
 		return result
 	}
@@ -268,7 +255,6 @@ func (l *loop) send(retryCount int, data []byte) sendResult {
 		}
 	}
 	l.statsFunc(types.NetworkStats{
-		SeriesSent:      len(l.series),
 		NewestTimestamp: newestTS,
 	})
 

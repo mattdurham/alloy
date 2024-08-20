@@ -53,7 +53,6 @@ type Queue struct {
 	opts      component.Options
 	log       log.Logger
 	endpoints map[string]*endpoint
-	ctx       context.Context
 }
 
 // Run starts the component, blocking until ctx is canceled or the component
@@ -121,6 +120,9 @@ func (s *Queue) createEndpoints() error {
 			Connections:    uint64(ep.QueueCount),
 		}, s.log, stats.UpdateNetwork, meta.UpdateNetwork)
 
+		if err != nil {
+			return err
+		}
 		// Serializer is set after
 		end := NewEndpoint(client, nil, stats, meta, s.args.TTL, s.opts.Logger)
 		// This wait group is to ensure we are started before we send on the mailbox.
@@ -136,6 +138,8 @@ func (s *Queue) createEndpoints() error {
 		}
 		end.serializer = serial
 		s.endpoints[ep.Name] = end
+		// endpoint is responsible for starting all the children, this way they spin up
+		// together and are town down together. Or at least handled internally.
 		end.Start()
 	}
 	return nil

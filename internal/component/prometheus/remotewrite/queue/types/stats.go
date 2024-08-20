@@ -1,8 +1,9 @@
 package types
 
 import (
-	"github.com/prometheus/client_golang/prometheus"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 type PrometheusStats struct {
@@ -22,6 +23,25 @@ type PrometheusStats struct {
 	FilequeueErrors                   prometheus.Counter
 
 	// Backwards compatibility metrics
+	SamplesTotal              prometheus.Counter
+	ExemplarsTotal            prometheus.Counter
+	HistogramsTotal           prometheus.Counter
+	MetadataTotal             prometheus.Counter
+	FailedSamplesTotal        prometheus.Counter
+	FailedHistogramsTotal     prometheus.Counter
+	FailedMetadataTotal       prometheus.Counter
+	RetriedSamplesTotal       prometheus.Counter
+	RetriedExemplarsTotal     prometheus.Counter
+	RetriedHistogramsTotal    prometheus.Counter
+	RetriedMetadataTotal      prometheus.Counter
+	EnqueueRetriesTotal       prometheus.Counter
+	SentBatchDuration         prometheus.Histogram
+	HighestSentTimestamp      prometheus.Gauge
+	PendingSamples            prometheus.Gauge
+	PendingExemplars          prometheus.Gauge
+	PendingHistograms         prometheus.Gauge
+	SentBytesTotal            prometheus.Counter
+	MetadataBytesTotal        prometheus.Counter
 	RemoteStorageInTimestamp  prometheus.Gauge
 	RemoteStorageOutTimestamp prometheus.Gauge
 	RemoteStorageDuration     prometheus.Histogram
@@ -94,6 +114,30 @@ func NewStats(namespace, subsystem string, registry prometheus.Registerer) *Prom
 			Subsystem: subsystem,
 			Name:      "network_errors",
 		}),
+		SamplesTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "prometheus_remote_storage_samples_total",
+			Help: "Total number of samples sent to remote storage.",
+		}),
+		ExemplarsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "prometheus_remote_storage_exemplars_total",
+			Help: "Total number of exemplars sent to remote storage.",
+		}),
+		HistogramsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "prometheus_remote_storage_histograms_total",
+			Help: "Total number of exemplars sent to remote storage.",
+		}),
+		MetadataTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "prometheus_remote_storage_exemplars_total",
+			Help: "Total number of exemplars sent to remote storage.",
+		}),
+		FailedSamplesTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "prometheus_remote_storage_samples_failed_total",
+			Help: "Total number of samples which failed on send to remote storage, non-recoverable errors.",
+		}),
+		FailedHistogramsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "prometheus_remote_storage_histograms_failed_total",
+			Help: "Total number of histograms which failed on send to remote storage, non-recoverable errors.",
+		}),
 	}
 	registry.MustRegister(
 		s.NetworkSentDuration,
@@ -120,11 +164,11 @@ func (s *PrometheusStats) BackwardsCompatibility(registry prometheus.Registerer)
 }
 
 func (s *PrometheusStats) UpdateNetwork(stats NetworkStats) {
-	s.NetworkSeriesSent.Add(float64(stats.SeriesSent))
-	s.NetworkRetries.Add(float64(stats.Retries))
-	s.NetworkFailures.Add(float64(stats.Fails))
-	s.NetworkRetries429.Add(float64(stats.Retries429))
-	s.NetworkRetries5XX.Add(float64(stats.Retries5XX))
+	s.NetworkSeriesSent.Add(float64(stats.TotalSent()))
+	s.NetworkRetries.Add(float64(stats.TotalRetried()))
+	s.NetworkFailures.Add(float64(stats.TotalFailed()))
+	s.NetworkRetries429.Add(float64(stats.Total429()))
+	s.NetworkRetries5XX.Add(float64(stats.Total5XX()))
 	s.NetworkSentDuration.Observe(stats.SendDuration.Seconds())
 	s.RemoteStorageDuration.Observe(stats.SendDuration.Seconds())
 	s.RemoteStorageOutTimestamp.Set(float64(stats.NewestTimestamp))
@@ -137,13 +181,40 @@ func (s *PrometheusStats) UpdateFileQueue(stats FileQueueStats) {
 }
 
 type NetworkStats struct {
-	Retries         int
-	Retries429      int
-	Retries5XX      int
+	Series          CategoryStats
+	Histogram       CategoryStats
+	Exemplars       CategoryStats
+	Metadata        CategoryStats
 	SendDuration    time.Duration
-	SeriesSent      int
-	Fails           int
 	NewestTimestamp int64
+}
+
+func (ns NetworkStats) TotalSent() int {
+	return ns.Series.SeriesSent + ns.Histogram.SeriesSent + ns.Exemplars.SeriesSent + ns.Metadata.SeriesSent
+}
+
+func (ns NetworkStats) TotalRetried() int {
+	return ns.Series.Retries + ns.Histogram.Retries + ns.Exemplars.Retries + ns.Metadata.Retries
+}
+
+func (ns NetworkStats) TotalFailed() int {
+	return ns.Series.Fails + ns.Histogram.Fails + ns.Exemplars.Fails + ns.Metadata.Fails
+}
+
+func (ns NetworkStats) Total429() int {
+	return ns.Series.Retries429 + ns.Histogram.Retries429 + ns.Exemplars.Retries429 + ns.Metadata.Retries429
+}
+
+func (ns NetworkStats) Total5XX() int {
+	return ns.Series.Retries5XX + ns.Histogram.Retries5XX + ns.Exemplars.Retries5XX + ns.Metadata.Retries5XX
+}
+
+type CategoryStats struct {
+	Retries    int
+	Retries429 int
+	Retries5XX int
+	SeriesSent int
+	Fails      int
 }
 
 type FileQueueStats struct {

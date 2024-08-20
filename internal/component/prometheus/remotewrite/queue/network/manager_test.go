@@ -160,7 +160,7 @@ func TestRecoverable(t *testing.T) {
 
 	logger := log.NewNopLogger()
 	wr, err := New(cc, logger, func(s types.NetworkStats) {
-		recoverable.Add(uint32(s.Retries5XX))
+		recoverable.Add(uint32(s.Total5XX()))
 	}, func(s types.NetworkStats) {})
 	require.NoError(t, err)
 	wr.Start()
@@ -201,7 +201,7 @@ func TestNonRecoverable(t *testing.T) {
 
 	logger := log.NewNopLogger()
 	wr, err := New(cc, logger, func(s types.NetworkStats) {
-		nonRecoverable.Add(uint32(s.Fails))
+		nonRecoverable.Add(uint32(s.TotalFailed()))
 	}, func(s types.NetworkStats) {})
 	wr.Start()
 	defer wr.Stop()
