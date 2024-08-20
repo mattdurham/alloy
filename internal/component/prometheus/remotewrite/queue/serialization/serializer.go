@@ -128,7 +128,7 @@ func (s *serializer) store(ctx actor.Context) error {
 	index := int32(0)
 
 	for si, ser := range s.series {
-		index = fillBinary(ser, strMapToInt, index)
+		index = types.FillBinary(ser, strMapToInt, index)
 		group.Series[si] = ser
 	}
 	stringsSlice := make([]string, len(strMapToInt))
@@ -153,37 +153,4 @@ func (s *serializer) store(ctx actor.Context) error {
 	}
 	err = s.queue.Send(ctx, meta, out)
 	return err
-}
-
-func fillBinary(ts *types.TimeSeriesBinary, strMapToInt map[string]int32, index int32) int32 {
-	if cap(ts.LabelsNames) < len(ts.Labels) {
-		ts.LabelsNames = make([]int32, len(ts.Labels))
-	} else {
-		ts.LabelsNames = ts.LabelsNames[:len(ts.Labels)]
-	}
-	if cap(ts.LabelsValues) < len(ts.Labels) {
-		ts.LabelsValues = make([]int32, len(ts.Labels))
-	} else {
-		ts.LabelsValues = ts.LabelsValues[:len(ts.Labels)]
-	}
-
-	for i, v := range ts.Labels {
-		val, found := strMapToInt[v.Name]
-		if !found {
-			strMapToInt[v.Name] = index
-			val = index
-			index++
-		}
-		ts.LabelsNames[i] = val
-
-		val, found = strMapToInt[v.Value]
-		if !found {
-			strMapToInt[v.Value] = index
-			val = index
-			index++
-		}
-		ts.LabelsValues[i] = val
-	}
-	return index
-
 }
