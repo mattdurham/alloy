@@ -10,6 +10,53 @@ internal API changes are not present.
 Main (unreleased)
 -----------------
 
+### Enhancements
+
+- Clustering peer resolution through `--cluster.join-addresses` flag has been
+  improved with more consistent behaviour, better error handling and added
+  support for A/AAAA DNS records. If necessary, users can temporarily opt out of
+  this new behaviour with the `--cluster.use-discovery-v1`, but this can only be
+  used as a temporary measure, since this flag will be disabled in future
+  releases. (@thampiotr)
+
+- Added a new panel to Cluster Overview dashboard to show the number of peers
+  seen by each instance in the cluster. This can help diagnose cluster split
+  brain issues. (@thampiotr)
+
+- Updated Snowflake exporter with performance improvements for larger environments. 
+  Also added a new panel to track deleted tables to the Snowflake mixin. (@Caleb-Hurshman)
+
+- Changed the cluster startup behaviour, reverting to the previous logic where
+  a failure to resolve cluster join peers results in the node creating its own cluster. This is
+  to facilitate the process of bootstrapping a new cluster following user feedback (@thampiotr)
+
+### Bugfixes
+
+- Fix a bug where custom components don't always get updated when the config is modified in an imported directory. (@ante012)
+
+- Fixed an issue which caused loss of context data in Faro exception. (@codecapitano)
+
+- Fixed an issue where providing multiple hostnames or IP addresses
+  via `--cluster.join-addresses` would only use the first provided value.
+  (@thampiotr)
+
+- Fixed an issue where providing `<hostname>:<port>`
+  in `--cluster.join-addresses` would only resolve with DNS to a single address,
+  instead of using all the available records. (@thampiotr)
+
+- Fixed an issue where clustering peers resolution via hostname in `--cluster.join-addresses`
+  resolves to duplicated IP addresses when using SRV records. (@thampiotr)
+
+- Fixed an issue where the `connection_string` for the `loki.source.azure_event_hubs` component
+  was displayed in the UI in plaintext. (@MorrisWitthein)
+
+- Fix a bug in `discovery.*` components where old `targets` would continue to be
+  exported to downstream components. This would only happen if the config
+  for `discovery.*`  is reloaded in such a way that no new targets were
+  discovered. (@ptodev, @thampiotr)
+
+- Fix a memory leak which would occur any time `loki.process` had its configuration reloaded. (@ptodev)
+
 v1.3.0
 -----------------
 
@@ -33,6 +80,7 @@ v1.3.0
   other `otelcol` components to the console. (@BarunKGP)
 
 ### Enhancements
+- Added custom metrics capability to oracle exporter. (@EHSchmitt4395)
 
 - Added a success rate panel on the Prometheus Components dashboard. (@thampiotr)
 
@@ -129,14 +177,17 @@ v1.3.0
 - Enable instances connected to remotecfg-compatible servers to Register
   themselves to the remote service. (@tpaschalis)
 
+- Allow in-memory listener to work for remotecfg-supplied components. (@tpaschalis)
+
 ### Bugfixes
 
 - Fixed a clustering mode issue where a fatal startup failure of the clustering service
   would exit the service silently, without also exiting the Alloy process. (@thampiotr)
 
-- Fix a bug which prevented config reloads to work if a Loki `metrics` stage is in the pipeline. 
+- Fix a bug which prevented config reloads to work if a Loki `metrics` stage is in the pipeline.
   Previously, the reload would fail for `loki.process` without an error in the logs and the metrics
   from the `metrics` stage would get stuck at the same values. (@ptodev)
+
 
 v1.2.1
 -----------------
