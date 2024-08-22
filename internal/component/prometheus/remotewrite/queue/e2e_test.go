@@ -168,7 +168,7 @@ type result struct {
 	l labels.Labels
 }
 
-func handlePost(t *testing.T, w http.ResponseWriter, r *http.Request) []prompb.TimeSeries {
+func handlePost(t *testing.T, _ http.ResponseWriter, r *http.Request) []prompb.TimeSeries {
 	defer r.Body.Close()
 	data, err := io.ReadAll(r.Body)
 	require.NoError(t, err)

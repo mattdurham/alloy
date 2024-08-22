@@ -1,14 +1,5 @@
 package types
 
-type NetworkQueueItem struct {
-	Hash uint64
-	TS   *TimeSeriesBinary
-}
-
-type NetworkMetadataItem struct {
-	TS *MetaSeriesBinary
-}
-
 type Data struct {
 	Meta map[string]string
 	Data []byte

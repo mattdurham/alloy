@@ -7,6 +7,6 @@ import (
 type NetworkClient interface {
 	Start()
 	Stop()
-	SendSeries(ctx context.Context, hash uint64, d *TimeSeriesBinary) error
+	SendSeries(ctx context.Context, d *TimeSeriesBinary) error
 	SendMetadata(ctx context.Context, d *MetaSeriesBinary) error
 }

@@ -25,9 +25,9 @@ var _ actor.Worker = (*loop)(nil)
 // loop handles the low level sending of data. It conceptually a queue.
 // TODO @mattdurham think about if we need to split loop into metadata loop
 type loop struct {
+	isMeta         bool
 	configMbx      actor.Mailbox[ConnectionConfig]
 	seriesMbx      actor.Mailbox[*types.TimeSeriesBinary]
-	metaSeriesMbx  actor.Mailbox[*types.MetaSeriesBinary]
 	client         *http.Client
 	batchCount     int
 	flushTimer     time.Duration
@@ -45,11 +45,10 @@ type loop struct {
 	sendBuffer     []byte
 }
 
-func newLoop(cc ConnectionConfig, log log.Logger, series func(s types.NetworkStats)) *loop {
+func newLoop(cc ConnectionConfig, isMetaData bool, log log.Logger, series func(s types.NetworkStats)) *loop {
 	l := &loop{
 		seriesMbx:      actor.NewMailbox[*types.TimeSeriesBinary](actor.OptCapacity(2 * cc.BatchCount)),
 		configMbx:      actor.NewMailbox[ConnectionConfig](),
-		metaSeriesMbx:  actor.NewMailbox[*types.MetaSeriesBinary](),
 		batchCount:     cc.BatchCount,
 		flushTimer:     cc.FlushDuration,
 		client:         &http.Client{},
@@ -82,7 +81,6 @@ func (l *loop) Stop() {
 func (l *loop) actors() []actor.Actor {
 	return []actor.Actor{
 		actor.New(l),
-		l.metaSeriesMbx,
 		l.seriesMbx,
 		l.configMbx,
 	}
@@ -130,13 +128,6 @@ func (l *loop) DoWork(ctx actor.Context) actor.WorkerStatus {
 		if len(l.series) >= l.batchCount {
 			l.trySend()
 		}
-		return actor.WorkerContinue
-	case <-l.metaSeriesMbx.ReceiveC():
-		/*l.series = append(l.series, buf)
-		if len(l.series) >= l.batchCount {
-			l.trySend(l.series)
-			l.series = l.series[:0]
-		}*/
 		return actor.WorkerContinue
 	}
 }
@@ -188,12 +179,17 @@ func (l *loop) finishSending() {
 func (l *loop) send(retryCount int) sendResult {
 	// TODO @mattdurham fill in all the various stat functions.
 	result := sendResult{}
+	var networkError bool
+	var statusCode int
+	defer func() {
+		l.recordStats(statusCode, networkError, result)
+	}()
 	var err error
 	// Check to see if this is a retry and we can reuse the buffer.
 	if len(l.sendBuffer) == 0 {
-		data, err := createWriteRequest(l.req, l.series, l.externalLabels, l.buf)
-		if err != nil {
-			result.err = err
+		data, wrErr := createWriteRequest(l.req, l.series, l.externalLabels, l.buf)
+		if wrErr != nil {
+			result.err = wrErr
 			return result
 		}
 		l.sendBuffer = snappy.Encode(l.sendBuffer, data)
@@ -219,18 +215,15 @@ func (l *loop) send(retryCount int) sendResult {
 	resp, err := l.client.Do(httpReq.WithContext(ctx))
 	// Network errors are recoverable.
 	if err != nil {
+		networkError = true
 		result.err = err
 		result.recoverableError = true
 		return result
 	}
+	statusCode = resp.StatusCode
 	defer resp.Body.Close()
 	// 500 errors are considered recoverable.
 	if resp.StatusCode/100 == 5 || resp.StatusCode == http.StatusTooManyRequests {
-		if resp.StatusCode == http.StatusTooManyRequests {
-			l.statsFunc(types.NetworkStats{})
-		} else {
-			l.statsFunc(types.NetworkStats{})
-		}
 		result.retryAfter = retryAfterDuration(resp.Header.Get("Retry-After"))
 		result.recoverableError = true
 		return result
@@ -242,21 +235,9 @@ func (l *loop) send(retryCount int) sendResult {
 		if scanner.Scan() {
 			line = scanner.Text()
 		}
-		l.statsFunc(types.NetworkStats{})
 		result.err = fmt.Errorf("server returned HTTP status %s: %s", resp.Status, line)
 		return result
 	}
-
-	// Find the newest
-	var newestTS int64
-	for _, ts := range l.series {
-		if ts.TS > newestTS {
-			newestTS = ts.TS
-		}
-	}
-	l.statsFunc(types.NetworkStats{
-		NewestTimestamp: newestTS,
-	})
 
 	result.successful = true
 	return result
@@ -331,6 +312,73 @@ func createWriteRequest(wr *prompb.WriteRequest, series []*types.TimeSeriesBinar
 	return data.Bytes(), err
 }
 
+func (l *loop) recordStats(statusCode int, networkError bool, r sendResult) {
+	if networkError {
+		l.statsFunc(types.NetworkStats{
+			Series: types.CategoryStats{
+				Fails: getSeriesCount(l.series),
+			},
+			Histogram: types.CategoryStats{
+				Fails: getHistogramCount(l.series),
+			},
+		})
+		return
+
+	}
+	if r.successful {
+		var newestTS int64
+		for _, ts := range l.series {
+			if ts.TS > newestTS {
+				newestTS = ts.TS
+			}
+		}
+		l.statsFunc(types.NetworkStats{
+			Series: types.CategoryStats{
+				SeriesSent: getSeriesCount(l.series),
+			},
+			Histogram: types.CategoryStats{
+				SeriesSent: getHistogramCount(l.series),
+			},
+			NewestTimestamp: newestTS,
+		})
+		return
+	}
+
+	if statusCode == http.StatusTooManyRequests {
+		l.statsFunc(types.NetworkStats{
+			Series: types.CategoryStats{
+				Retries429: getSeriesCount(l.series),
+			},
+			Histogram: types.CategoryStats{
+				Retries429: getHistogramCount(l.series),
+			},
+		})
+		return
+	}
+	if statusCode/100 == 5 {
+		l.statsFunc(types.NetworkStats{
+			Series: types.CategoryStats{
+				Retries5XX: getSeriesCount(l.series),
+			},
+			Histogram: types.CategoryStats{
+				Retries5XX: getHistogramCount(l.series),
+			},
+		})
+		return
+	}
+
+	if statusCode != 200 {
+		l.statsFunc(types.NetworkStats{
+			Series: types.CategoryStats{
+				Fails: getSeriesCount(l.series),
+			},
+			Histogram: types.CategoryStats{
+				Fails: getHistogramCount(l.series),
+			},
+		})
+	}
+}
+
 func retryAfterDuration(t string) time.Duration {
 	parsedDuration, err := time.Parse(http.TimeFormat, t)
 	if err == nil {
@@ -342,4 +390,24 @@ func retryAfterDuration(t string) time.Duration {
 		return 5
 	}
 	return time.Duration(d) * time.Second
+}
+
+func getSeriesCount(tss []*types.TimeSeriesBinary) int {
+	cnt := 0
+	for _, ts := range tss {
+		if ts.Histograms.Histogram == nil && ts.Histograms.FloatHistogram == nil {
+			cnt++
+		}
+	}
+	return cnt
+}
+
+func getHistogramCount(tss []*types.TimeSeriesBinary) int {
+	cnt := 0
+	for _, ts := range tss {
+		if ts.Histograms.Histogram != nil || ts.Histograms.FloatHistogram != nil {
+			cnt++
+		}
+	}
+	return cnt
 }

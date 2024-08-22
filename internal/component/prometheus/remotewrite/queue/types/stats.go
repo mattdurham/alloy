@@ -127,8 +127,8 @@ func NewStats(namespace, subsystem string, registry prometheus.Registerer) *Prom
 			Help: "Total number of exemplars sent to remote storage.",
 		}),
 		MetadataTotal: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "prometheus_remote_storage_exemplars_total",
-			Help: "Total number of exemplars sent to remote storage.",
+			Name: "prometheus_remote_storage_metadta_total",
+			Help: "Total number of metadata sent to remote storage.",
 		}),
 		FailedSamplesTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "prometheus_remote_storage_samples_failed_total",
@@ -137,6 +137,35 @@ func NewStats(namespace, subsystem string, registry prometheus.Registerer) *Prom
 		FailedHistogramsTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "prometheus_remote_storage_histograms_failed_total",
 			Help: "Total number of histograms which failed on send to remote storage, non-recoverable errors.",
+		}),
+		FailedMetadataTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "prometheus_remote_storage_metadata_failed_total",
+			Help: "Total number of metadata entries which failed on send to remote storage, non-recoverable errors.",
+		}),
+
+		RetriedSamplesTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "prometheus_remote_storage_samples_retried_total",
+			Help: "Total number of samples which failed on send to remote storage but were retried because the send error was recoverable.",
+		}),
+		RetriedExemplarsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "prometheus_remote_storage_exemplars_retried_total",
+			Help: "Total number of exemplars which failed on send to remote storage but were retried because the send error was recoverable.",
+		}),
+		RetriedHistogramsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "prometheus_remote_storage_histograms_retried_total",
+			Help: "Total number of histograms which failed on send to remote storage but were retried because the send error was recoverable.",
+		}),
+		RetriedMetadataTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "prometheus_remote_storage_metadata_retried_total",
+			Help: "Total number of metadata entries which failed on send to remote storage but were retried because the send error was recoverable.",
+		}),
+		SentBytesTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "prometheus_remote_storage_sent_bytes_total",
+			Help: "The total number of bytes of data (not metadata) sent by the queue after compression. Note that when exemplars over remote write is enabled the exemplars included in a remote write request count towards this metric.",
+		}),
+		MetadataBytesTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "prometheus_remote_storage_metadata_bytes_total",
+			Help: "The total number of bytes of metadata sent by the queue after compression.",
 		}),
 	}
 	registry.MustRegister(
@@ -160,6 +189,19 @@ func (s *PrometheusStats) BackwardsCompatibility(registry prometheus.Registerer)
 		s.RemoteStorageDuration,
 		s.RemoteStorageInTimestamp,
 		s.RemoteStorageOutTimestamp,
+		s.SamplesTotal,
+		s.ExemplarsTotal,
+		s.HistogramsTotal,
+		s.MetadataTotal,
+		s.FailedSamplesTotal,
+		s.FailedHistogramsTotal,
+		s.FailedMetadataTotal,
+		s.RetriedSamplesTotal,
+		s.RetriedExemplarsTotal,
+		s.RetriedHistogramsTotal,
+		s.RetriedMetadataTotal,
+		s.SentBytesTotal,
+		s.MetadataBytesTotal,
 	)
 }
 
@@ -172,6 +214,7 @@ func (s *PrometheusStats) UpdateNetwork(stats NetworkStats) {
 	s.NetworkSentDuration.Observe(stats.SendDuration.Seconds())
 	s.RemoteStorageDuration.Observe(stats.SendDuration.Seconds())
 	s.RemoteStorageOutTimestamp.Set(float64(stats.NewestTimestamp))
+	// TODO @mattdurham add all the backwards compatibility stats here.
 }
 
 func (s *PrometheusStats) UpdateFileQueue(stats FileQueueStats) {

@@ -15,8 +15,8 @@ type manager struct {
 	loops           []*loop
 	metadata        *loop
 	logger          log.Logger
-	inbox           actor.Mailbox[types.NetworkQueueItem]
-	metaInbox       actor.Mailbox[types.NetworkMetadataItem]
+	inbox           actor.Mailbox[*types.TimeSeriesBinary]
+	metaInbox       actor.Mailbox[*types.MetaSeriesBinary]
 	self            actor.Actor
 	cfg             ConnectionConfig
 	stats           func(types.NetworkStats)
@@ -32,20 +32,22 @@ func New(cc ConnectionConfig, logger log.Logger, seriesStats, metadataStats func
 		connectionCount: cc.Connections,
 		loops:           make([]*loop, 0),
 		logger:          logger,
-		inbox:           actor.NewMailbox[types.NetworkQueueItem](actor.OptCapacity(1)),
-		metaInbox:       actor.NewMailbox[types.NetworkMetadataItem](actor.OptCapacity(1)),
-		stats:           seriesStats,
+		// This provides blocking to only handle one at a time, so that if a queue blocks
+		// it will stop the filequeue from feeding more.
+		inbox:     actor.NewMailbox[*types.TimeSeriesBinary](actor.OptCapacity(1)),
+		metaInbox: actor.NewMailbox[*types.MetaSeriesBinary](actor.OptCapacity(1)),
+		stats:     seriesStats,
 	}
 
 	// start kicks off a number of concurrent connections.
 	var i uint64
 	for ; i < s.connectionCount; i++ {
-		l := newLoop(cc, logger, seriesStats)
+		l := newLoop(cc, false, logger, seriesStats)
 		l.self = actor.New(l)
 		s.loops = append(s.loops, l)
 	}
 
-	s.metadata = newLoop(cc, logger, metadataStats)
+	s.metadata = newLoop(cc, true, logger, metadataStats)
 	s.metadata.self = actor.New(s.metadata)
 	return s, nil
 }
@@ -63,17 +65,12 @@ func (s *manager) Start() {
 	s.self.Start()
 }
 
-func (s *manager) SendSeries(ctx context.Context, hash uint64, data *types.TimeSeriesBinary) error {
-	return s.inbox.Send(ctx, types.NetworkQueueItem{
-		Hash: hash,
-		TS:   data,
-	})
+func (s *manager) SendSeries(ctx context.Context, data *types.TimeSeriesBinary) error {
+	return s.inbox.Send(ctx, data)
 }
 
 func (s *manager) SendMetadata(ctx context.Context, data *types.MetaSeriesBinary) error {
-	return s.metaInbox.Send(ctx, types.NetworkMetadataItem{
-		TS: data,
-	})
+	return s.metaInbox.Send(ctx, data)
 }
 
 func (s *manager) DoWork(ctx actor.Context) actor.WorkerStatus {
@@ -85,7 +82,7 @@ func (s *manager) DoWork(ctx actor.Context) actor.WorkerStatus {
 		if !ok {
 			return actor.WorkerEnd
 		}
-		s.Queue(ctx, item.Hash, item.TS)
+		s.Queue(ctx, item)
 		return actor.WorkerContinue
 	case _, ok := <-s.metaInbox.ReceiveC():
 		if !ok {
@@ -112,12 +109,12 @@ func (s *manager) updateConfig(cc ConnectionConfig) {
 	s.loops = make([]*loop, 0)
 	var i uint64
 	for ; i < s.connectionCount; i++ {
-		l := newLoop(cc, s.logger, s.stats)
+		l := newLoop(cc, false, s.logger, s.stats)
 		l.self = actor.New(l)
 		s.loops = append(s.loops, l)
 	}
 
-	s.metadata = newLoop(cc, s.logger, s.metaStats)
+	s.metadata = newLoop(cc, true, s.logger, s.metaStats)
 	s.metadata.self = actor.New(s.metadata)
 }
 
@@ -132,13 +129,8 @@ func (s *manager) Stop() {
 }
 
 // Queue adds anything thats not metadata to the queue.
-func (s *manager) Queue(ctx context.Context, hash uint64, d *types.TimeSeriesBinary) {
+func (s *manager) Queue(ctx context.Context, d *types.TimeSeriesBinary) {
 	// Based on a hash which is the label hash add to the queue.
-	queueNum := hash % s.connectionCount
+	queueNum := d.Hash % s.connectionCount
 	_ = s.loops[queueNum].seriesMbx.Send(ctx, d)
-}
-
-// QueueMetadata adds metadata to the queue.
-func (s *manager) QueueMetadata(ctx context.Context, d *types.MetaSeriesBinary) {
-	_ = s.metadata.metaSeriesMbx.Send(ctx, d)
 }

@@ -220,7 +220,7 @@ func TestNonRecoverable(t *testing.T) {
 func send(t *testing.T, wr types.NetworkClient, ctx context.Context) {
 	ts := createSeries(t)
 	// The actual hash is only used for queueing into different buckets.
-	err := wr.SendSeries(ctx, rand.Uint64(), ts)
+	err := wr.SendSeries(ctx, ts)
 	require.NoError(t, err)
 }
 

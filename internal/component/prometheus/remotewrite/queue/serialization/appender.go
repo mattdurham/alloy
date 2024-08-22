@@ -49,7 +49,10 @@ func (a *appender) Append(ref storage.SeriesRef, l labels.Labels, t int64, v flo
 	ts.TS = t
 	ts.Value = v
 	ts.Hash = l.Hash()
-	a.s.SendSeries(context.Background(), ts)
+	err := a.s.SendSeries(context.Background(), ts)
+	if err != nil {
+		return ref, err
+	}
 	a.stats(types.FileQueueStats{
 		SeriesStored:    1,
 		NewestTimestamp: t,

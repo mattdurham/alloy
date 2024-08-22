@@ -117,7 +117,7 @@ func (ep *endpoint) deserializeAndSend(ctx context.Context, meta map[string]stri
 		if seriesAge > ep.ttl {
 			continue
 		}
-		sendErr := ep.network.SendSeries(ctx, series.Hash, series)
+		sendErr := ep.network.SendSeries(ctx, series)
 		if sendErr != nil {
 			level.Error(ep.log).Log("msg", "error sending to write client", "err", sendErr)
 		}
