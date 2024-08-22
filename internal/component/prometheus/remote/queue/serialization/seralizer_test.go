@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"github.com/go-kit/log"
 	"github.com/golang/snappy"
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
+	"github.com/grafana/alloy/internal/component/prometheus/remote/queue/types"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/stretchr/testify/require"
 	"testing"

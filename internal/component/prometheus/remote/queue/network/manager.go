@@ -6,7 +6,7 @@ import (
 	"github.com/grafana/alloy/internal/runtime/logging/level"
 
 	"github.com/go-kit/log"
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
+	"github.com/grafana/alloy/internal/component/prometheus/remote/queue/types"
 	"github.com/vladopajic/go-actor/actor"
 )
 

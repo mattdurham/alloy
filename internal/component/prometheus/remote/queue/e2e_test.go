@@ -13,7 +13,7 @@ import (
 
 	"github.com/golang/snappy"
 	"github.com/grafana/alloy/internal/component"
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
+	"github.com/grafana/alloy/internal/component/prometheus/remote/queue/types"
 	"github.com/grafana/alloy/internal/runtime/logging"
 	"github.com/grafana/alloy/internal/util"
 	"github.com/prometheus/client_golang/prometheus"
@@ -52,42 +52,44 @@ func TestE2E(t *testing.T) {
 				}
 			},
 		},
-		//{
-		//	name: "histogram",
-		//	maker: func(index int, app storage.Appender) {
-		//		ts, lbls, h := makeHistogram(index)
-		//		_, errApp := app.AppendHistogram(0, lbls, ts, h, nil)
-		//		require.NoError(t, errApp)
-		//	},
-		//	tester: func(samples []prompb.TimeSeries) {
-		//		t.Helper()
-		//		for _, s := range samples {
-		//			require.True(t, len(s.Samples) == 1)
-		//			require.True(t, s.Samples[0].Timestamp > 0)
-		//			require.True(t, s.Samples[0].Value == 0)
-		//			require.True(t, len(s.Labels) == 1)
-		//			histSame(t, hist(), s.Histograms[0])
-		//		}
-		//	},
-		//},
-		//{
-		//	name: "float histogram",
-		//	maker: func(index int, app storage.Appender) {
-		//		ts, lbls, h := makeFloatHistogram(index)
-		//		_, errApp := app.AppendHistogram(0, lbls, ts, nil, h)
-		//		require.NoError(t, errApp)
-		//	},
-		//	tester: func(samples []prompb.TimeSeries) {
-		//		t.Helper()
-		//		for _, s := range samples {
-		//			require.True(t, len(s.Samples) == 1)
-		//			require.True(t, s.Samples[0].Timestamp > 0)
-		//			require.True(t, s.Samples[0].Value == 0)
-		//			require.True(t, len(s.Labels) == 1)
-		//			histFloatSame(t, histFloat(), s.Histograms[0])
-		//		}
-		//	},
-		//},
+		{
+			name: "histogram",
+			maker: func(index int, app storage.Appender) (float64, labels.Labels) {
+				ts, lbls, h := makeHistogram(index)
+				_, errApp := app.AppendHistogram(0, lbls, ts, h, nil)
+				require.NoError(t, errApp)
+				return h.Sum, lbls
+			},
+			tester: func(samples []prompb.TimeSeries) {
+				t.Helper()
+				for _, s := range samples {
+					require.True(t, len(s.Samples) == 1)
+					require.True(t, s.Samples[0].Timestamp > 0)
+					require.True(t, s.Samples[0].Value == 0)
+					require.True(t, len(s.Labels) == 1)
+					histSame(t, hist(int(s.Histograms[0].Sum)), s.Histograms[0])
+				}
+			},
+		},
+		{
+			name: "float histogram",
+			maker: func(index int, app storage.Appender) (float64, labels.Labels) {
+				ts, lbls, h := makeFloatHistogram(index)
+				_, errApp := app.AppendHistogram(0, lbls, ts, nil, h)
+				require.NoError(t, errApp)
+				return h.Sum, lbls
+			},
+			tester: func(samples []prompb.TimeSeries) {
+				t.Helper()
+				for _, s := range samples {
+					require.True(t, len(s.Samples) == 1)
+					require.True(t, s.Samples[0].Timestamp > 0)
+					require.True(t, s.Samples[0].Value == 0)
+					require.True(t, len(s.Labels) == 1)
+					histFloatSame(t, histFloat(int(s.Histograms[0].Sum)), s.Histograms[0])
+				}
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -150,11 +152,20 @@ func runTest(t *testing.T, add func(index int, appendable storage.Appender) (flo
 	}
 	cancel()
 	for _, s := range samples {
-		lbls, ok := results[s.Samples[0].Value]
-		require.True(t, ok)
-		for i, sLbl := range s.Labels {
-			require.True(t, lbls[i].Name == sLbl.Name)
-			require.True(t, lbls[i].Value == sLbl.Value)
+		if len(s.Histograms) == 1 {
+			lbls, ok := results[s.Histograms[0].Sum]
+			require.True(t, ok)
+			for i, sLbl := range s.Labels {
+				require.True(t, lbls[i].Name == sLbl.Name)
+				require.True(t, lbls[i].Value == sLbl.Value)
+			}
+		} else {
+			lbls, ok := results[s.Samples[0].Value]
+			require.True(t, ok)
+			for i, sLbl := range s.Labels {
+				require.True(t, lbls[i].Name == sLbl.Name)
+				require.True(t, lbls[i].Value == sLbl.Value)
+			}
 		}
 
 	}
@@ -188,17 +199,17 @@ func makeSeries(index int) (int64, float64, labels.Labels) {
 }
 
 func makeHistogram(index int) (int64, labels.Labels, *histogram.Histogram) {
-	return time.Now().UTC().Unix(), labels.FromStrings(fmt.Sprintf("name_%d", index), fmt.Sprintf("value_%d", index)), hist()
+	return time.Now().UTC().Unix(), labels.FromStrings(fmt.Sprintf("name_%d", index), fmt.Sprintf("value_%d", index)), hist(index)
 }
 
-func hist() *histogram.Histogram {
+func hist(i int) *histogram.Histogram {
 	return &histogram.Histogram{
 		CounterResetHint: 1,
 		Schema:           2,
 		ZeroThreshold:    3,
 		ZeroCount:        4,
 		Count:            5,
-		Sum:              6,
+		Sum:              float64(i),
 		PositiveSpans: []histogram.Span{
 			{
 				Offset: 1,
@@ -238,17 +249,17 @@ func histSpanSame(t *testing.T, h []histogram.Span, pb []prompb.BucketSpan) {
 }
 
 func makeFloatHistogram(index int) (int64, labels.Labels, *histogram.FloatHistogram) {
-	return time.Now().UTC().Unix(), labels.FromStrings(fmt.Sprintf("name_%d", index), fmt.Sprintf("value_%d", index)), histFloat()
+	return time.Now().UTC().Unix(), labels.FromStrings(fmt.Sprintf("name_%d", index), fmt.Sprintf("value_%d", index)), histFloat(index)
 }
 
-func histFloat() *histogram.FloatHistogram {
+func histFloat(i int) *histogram.FloatHistogram {
 	return &histogram.FloatHistogram{
 		CounterResetHint: 1,
 		Schema:           2,
 		ZeroThreshold:    3,
 		ZeroCount:        4,
 		Count:            5,
-		Sum:              6,
+		Sum:              float64(i),
 		PositiveSpans: []histogram.Span{
 			{
 				Offset: 1,

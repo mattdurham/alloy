@@ -9,7 +9,7 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/grafana/alloy/internal/component"
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
+	"github.com/grafana/alloy/internal/component/prometheus/remote/queue/types"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/prometheus/prometheus/storage"

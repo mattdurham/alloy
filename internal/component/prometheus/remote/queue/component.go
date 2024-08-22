@@ -6,14 +6,14 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/filequeue"
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/network"
+	"github.com/grafana/alloy/internal/component/prometheus/remote/queue/filequeue"
+	"github.com/grafana/alloy/internal/component/prometheus/remote/queue/network"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/go-kit/log"
 	"github.com/grafana/alloy/internal/component"
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/serialization"
-	"github.com/grafana/alloy/internal/component/prometheus/remotewrite/queue/types"
+	"github.com/grafana/alloy/internal/component/prometheus/remote/queue/serialization"
+	"github.com/grafana/alloy/internal/component/prometheus/remote/queue/types"
 	"github.com/grafana/alloy/internal/featuregate"
 	"github.com/prometheus/prometheus/storage"
 )
