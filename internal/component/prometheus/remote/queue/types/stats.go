@@ -127,7 +127,7 @@ func NewStats(namespace, subsystem string, registry prometheus.Registerer) *Prom
 			Help: "Total number of exemplars sent to remote storage.",
 		}),
 		MetadataTotal: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "prometheus_remote_storage_metadta_total",
+			Name: "prometheus_remote_storage_metadata_total",
 			Help: "Total number of metadata sent to remote storage.",
 		}),
 		FailedSamplesTotal: prometheus.NewCounter(prometheus.CounterOpts{
@@ -213,14 +213,37 @@ func (s *PrometheusStats) UpdateNetwork(stats NetworkStats) {
 	s.NetworkRetries5XX.Add(float64(stats.Total5XX()))
 	s.NetworkSentDuration.Observe(stats.SendDuration.Seconds())
 	s.RemoteStorageDuration.Observe(stats.SendDuration.Seconds())
-	s.RemoteStorageOutTimestamp.Set(float64(stats.NewestTimestamp))
-	// TODO @mattdurham add all the backwards compatibility stats here.
+	// The newest timestamp is no always sent.
+	if stats.NewestTimestamp != 0 {
+		s.RemoteStorageOutTimestamp.Set(float64(stats.NewestTimestamp))
+	}
+
+	s.SamplesTotal.Add(float64(stats.Series.SeriesSent))
+	s.ExemplarsTotal.Add(float64(stats.Exemplars.SeriesSent))
+	s.MetadataTotal.Add(float64(stats.Metadata.SeriesSent))
+	s.HistogramsTotal.Add(float64(stats.Histogram.SeriesSent))
+
+	s.FailedSamplesTotal.Add(float64(stats.Series.Fails))
+	s.FailedMetadataTotal.Add(float64(stats.Metadata.Fails))
+	s.FailedHistogramsTotal.Add(float64(stats.Histogram.Fails))
+	// TODO is there no failed exemplars?
+
+	s.RetriedSamplesTotal.Add(float64(stats.Series.Retries))
+	s.RetriedExemplarsTotal.Add(float64(stats.Exemplars.Retries))
+	s.RetriedHistogramsTotal.Add(float64(stats.Histogram.Retries))
+	s.RetriedMetadataTotal.Add(float64(stats.Metadata.Retries))
+
+	s.MetadataBytesTotal.Add(float64(stats.MetadataBytes))
+	s.SentBytesTotal.Add(float64(stats.SeriesBytes))
 }
 
 func (s *PrometheusStats) UpdateFileQueue(stats FileQueueStats) {
 	s.FilequeueInSeries.Add(float64(stats.SeriesStored))
 	s.FilequeueErrors.Add(float64(stats.Errors))
-	s.FilequeueNewestInTimeStampSeconds.Set(float64(stats.NewestTimestamp))
+	if stats.NewestTimestamp != 0 {
+		s.FilequeueNewestInTimeStampSeconds.Set(float64(stats.NewestTimestamp))
+		s.RemoteStorageInTimestamp.Set(float64(stats.NewestTimestamp))
+	}
 }
 
 type NetworkStats struct {
@@ -230,6 +253,8 @@ type NetworkStats struct {
 	Metadata        CategoryStats
 	SendDuration    time.Duration
 	NewestTimestamp int64
+	SeriesBytes     int
+	MetadataBytes   int
 }
 
 func (ns NetworkStats) TotalSent() int {

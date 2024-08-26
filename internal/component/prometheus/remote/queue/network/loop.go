@@ -47,6 +47,7 @@ type loop struct {
 
 func newLoop(cc ConnectionConfig, isMetaData bool, log log.Logger, series func(s types.NetworkStats)) *loop {
 	l := &loop{
+		isMeta:         isMetaData,
 		seriesMbx:      actor.NewMailbox[*types.TimeSeriesBinary](actor.OptCapacity(2 * cc.BatchCount)),
 		configMbx:      actor.NewMailbox[ConnectionConfig](),
 		batchCount:     cc.BatchCount,
@@ -177,12 +178,11 @@ func (l *loop) finishSending() {
 }
 
 func (l *loop) send(retryCount int) sendResult {
-	// TODO @mattdurham fill in all the various stat functions.
 	result := sendResult{}
 	var networkError bool
 	var statusCode int
 	defer func() {
-		l.recordStats(statusCode, networkError, result)
+		l.recordStats(statusCode, networkError, result, len(l.sendBuffer))
 	}()
 	var err error
 	// Check to see if this is a retry and we can reuse the buffer.
@@ -312,7 +312,7 @@ func createWriteRequest(wr *prompb.WriteRequest, series []*types.TimeSeriesBinar
 	return data.Bytes(), err
 }
 
-func (l *loop) recordStats(statusCode int, networkError bool, r sendResult) {
+func (l *loop) recordStats(statusCode int, networkError bool, r sendResult, bytesSent int) {
 	if networkError {
 		l.statsFunc(types.NetworkStats{
 			Series: types.CategoryStats{
@@ -332,6 +332,13 @@ func (l *loop) recordStats(statusCode int, networkError bool, r sendResult) {
 				newestTS = ts.TS
 			}
 		}
+		var sampleBytesSent int
+		var metaBytesSent int
+		if l.isMeta {
+			metaBytesSent = bytesSent
+		} else {
+			sampleBytesSent = bytesSent
+		}
 		l.statsFunc(types.NetworkStats{
 			Series: types.CategoryStats{
 				SeriesSent: getSeriesCount(l.series),
@@ -339,6 +346,8 @@ func (l *loop) recordStats(statusCode int, networkError bool, r sendResult) {
 			Histogram: types.CategoryStats{
 				SeriesSent: getHistogramCount(l.series),
 			},
+			MetadataBytes:   metaBytesSent,
+			SeriesBytes:     sampleBytesSent,
 			NewestTimestamp: newestTS,
 		})
 		return
@@ -347,9 +356,11 @@ func (l *loop) recordStats(statusCode int, networkError bool, r sendResult) {
 	if statusCode == http.StatusTooManyRequests {
 		l.statsFunc(types.NetworkStats{
 			Series: types.CategoryStats{
+				Retries:    getSeriesCount(l.series),
 				Retries429: getSeriesCount(l.series),
 			},
 			Histogram: types.CategoryStats{
+				Retries:    getSeriesCount(l.series),
 				Retries429: getHistogramCount(l.series),
 			},
 		})

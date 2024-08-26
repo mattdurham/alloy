@@ -115,7 +115,7 @@ func runTest(t *testing.T, add func(index int, appendable storage.Appender) (flo
 		}
 	}))
 	expCh := make(chan types.Exports, 1)
-	c, err := newComponent(t, l, srv.URL, expCh)
+	c, err := newComponent(t, l, srv.URL, expCh, prometheus.NewRegistry())
 	require.NoError(t, err)
 	ctx := context.Background()
 	ctx, cancel := context.WithCancel(ctx)
@@ -290,7 +290,7 @@ func histFloatSame(t *testing.T, h *histogram.FloatHistogram, pb prompb.Histogra
 	histSpanSame(t, h.NegativeSpans, pb.NegativeSpans)
 }
 
-func newComponent(t *testing.T, l *logging.Logger, url string, exp chan types.Exports) (*Queue, error) {
+func newComponent(t *testing.T, l *logging.Logger, url string, exp chan types.Exports, reg prometheus.Registerer) (*Queue, error) {
 	return NewComponent(component.Options{
 		ID:       "test",
 		Logger:   l,
@@ -298,7 +298,7 @@ func newComponent(t *testing.T, l *logging.Logger, url string, exp chan types.Ex
 		OnStateChange: func(e component.Exports) {
 			exp <- e.(types.Exports)
 		},
-		Registerer: prometheus.NewRegistry(),
+		Registerer: reg,
 		Tracer:     nil,
 	}, types.Arguments{
 		TTL:           2 * time.Hour,
@@ -307,7 +307,7 @@ func newComponent(t *testing.T, l *logging.Logger, url string, exp chan types.Ex
 		Connections: []types.ConnectionConfig{{
 			Name:                    "test",
 			URL:                     url,
-			Timeout:                 10 * time.Second,
+			Timeout:                 20 * time.Second,
 			RetryBackoff:            1 * time.Second,
 			MaxRetryBackoffAttempts: 0,
 			BatchCount:              50,
