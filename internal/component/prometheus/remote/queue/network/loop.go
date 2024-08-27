@@ -360,7 +360,7 @@ func (l *loop) recordStats(statusCode int, networkError bool, r sendResult, byte
 				Retries429: getSeriesCount(l.series),
 			},
 			Histogram: types.CategoryStats{
-				Retries:    getSeriesCount(l.series),
+				Retries:    getHistogramCount(l.series),
 				Retries429: getHistogramCount(l.series),
 			},
 		})

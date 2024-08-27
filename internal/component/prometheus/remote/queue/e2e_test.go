@@ -309,7 +309,7 @@ func newComponent(t *testing.T, l *logging.Logger, url string, exp chan types.Ex
 			URL:                     url,
 			Timeout:                 20 * time.Second,
 			RetryBackoff:            1 * time.Second,
-			MaxRetryBackoffAttempts: 0,
+			MaxRetryBackoffAttempts: 1,
 			BatchCount:              50,
 			FlushDuration:           1 * time.Second,
 			QueueCount:              1,

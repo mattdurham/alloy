@@ -30,6 +30,7 @@ type PrometheusStats struct {
 	FailedSamplesTotal        prometheus.Counter
 	FailedHistogramsTotal     prometheus.Counter
 	FailedMetadataTotal       prometheus.Counter
+	FailedExemplarsTotal      prometheus.Counter
 	RetriedSamplesTotal       prometheus.Counter
 	RetriedExemplarsTotal     prometheus.Counter
 	RetriedHistogramsTotal    prometheus.Counter
@@ -142,6 +143,10 @@ func NewStats(namespace, subsystem string, registry prometheus.Registerer) *Prom
 			Name: "prometheus_remote_storage_metadata_failed_total",
 			Help: "Total number of metadata entries which failed on send to remote storage, non-recoverable errors.",
 		}),
+		FailedExemplarsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "prometheus_remote_storage_exemplar_failed_total",
+			Help: "Total number of exemplars which failed on send to remote storage, non-recoverable errors.",
+		}),
 
 		RetriedSamplesTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "prometheus_remote_storage_samples_retried_total",
@@ -196,6 +201,7 @@ func (s *PrometheusStats) BackwardsCompatibility(registry prometheus.Registerer)
 		s.FailedSamplesTotal,
 		s.FailedHistogramsTotal,
 		s.FailedMetadataTotal,
+		s.FailedExemplarsTotal,
 		s.RetriedSamplesTotal,
 		s.RetriedExemplarsTotal,
 		s.RetriedHistogramsTotal,
@@ -226,7 +232,7 @@ func (s *PrometheusStats) UpdateNetwork(stats NetworkStats) {
 	s.FailedSamplesTotal.Add(float64(stats.Series.Fails))
 	s.FailedMetadataTotal.Add(float64(stats.Metadata.Fails))
 	s.FailedHistogramsTotal.Add(float64(stats.Histogram.Fails))
-	// TODO is there no failed exemplars?
+	s.FailedExemplarsTotal.Add(float64(stats.Exemplars.Fails))
 
 	s.RetriedSamplesTotal.Add(float64(stats.Series.Retries))
 	s.RetriedExemplarsTotal.Add(float64(stats.Exemplars.Retries))
