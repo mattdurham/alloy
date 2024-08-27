@@ -77,6 +77,7 @@ func (a *appender) AppendExemplar(ref storage.SeriesRef, _ labels.Labels, e exem
 		return ref, nil
 	}
 
+	// TODO need to treat exemplars as special and encode the type.
 	ts := types.GetTimeSeriesBinary()
 	ts.Hash = e.Labels.Hash()
 	ts.TS = e.Ts

@@ -276,6 +276,8 @@ func createWriteRequest(wr *prompb.WriteRequest, series []*types.TimeSeriesBinar
 			ts.Histograms = ts.Histograms[:0]
 		}
 
+		// TODO add exemplar support
+
 		// Encode the external labels inside if needed.
 		for k, v := range externalLabels {
 			found := false
