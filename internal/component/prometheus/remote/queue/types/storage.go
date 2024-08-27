@@ -18,7 +18,7 @@ type Serializer interface {
 	Start()
 	Stop()
 	SendSeries(ctx context.Context, data *TimeSeriesBinary) error
-	SendMetadata(ctx context.Context, data *MetaSeriesBinary) error
+	SendMetadata(ctx context.Context, data *TimeSeriesBinary) error
 }
 
 var tsBinaryPool = sync.Pool{

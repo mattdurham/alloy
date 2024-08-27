@@ -2634,310 +2634,6 @@ func (z *Histograms) Msgsize() (s int) {
 }
 
 // DecodeMsg implements msgp.Decodable
-func (z *MetaSeriesBinary) DecodeMsg(dc *msgp.Reader) (err error) {
-	var field []byte
-	_ = field
-	var zb0001 uint32
-	zb0001, err = dc.ReadMapHeader()
-	if err != nil {
-		err = msgp.WrapError(err)
-		return
-	}
-	for zb0001 > 0 {
-		zb0001--
-		field, err = dc.ReadMapKeyPtr()
-		if err != nil {
-			err = msgp.WrapError(err)
-			return
-		}
-		switch msgp.UnsafeString(field) {
-		case "LabelsNames":
-			var zb0002 uint32
-			zb0002, err = dc.ReadArrayHeader()
-			if err != nil {
-				err = msgp.WrapError(err, "LabelsNames")
-				return
-			}
-			if cap(z.LabelsNames) >= int(zb0002) {
-				z.LabelsNames = (z.LabelsNames)[:zb0002]
-			} else {
-				z.LabelsNames = make([]int32, zb0002)
-			}
-			for za0001 := range z.LabelsNames {
-				z.LabelsNames[za0001], err = dc.ReadInt32()
-				if err != nil {
-					err = msgp.WrapError(err, "LabelsNames", za0001)
-					return
-				}
-			}
-		case "LabelsValues":
-			var zb0003 uint32
-			zb0003, err = dc.ReadArrayHeader()
-			if err != nil {
-				err = msgp.WrapError(err, "LabelsValues")
-				return
-			}
-			if cap(z.LabelsValues) >= int(zb0003) {
-				z.LabelsValues = (z.LabelsValues)[:zb0003]
-			} else {
-				z.LabelsValues = make([]int32, zb0003)
-			}
-			for za0002 := range z.LabelsValues {
-				z.LabelsValues[za0002], err = dc.ReadInt32()
-				if err != nil {
-					err = msgp.WrapError(err, "LabelsValues", za0002)
-					return
-				}
-			}
-		case "TS":
-			z.TS, err = dc.ReadInt64()
-			if err != nil {
-				err = msgp.WrapError(err, "TS")
-				return
-			}
-		case "Value":
-			z.Value, err = dc.ReadFloat64()
-			if err != nil {
-				err = msgp.WrapError(err, "Value")
-				return
-			}
-		case "Hash":
-			z.Hash, err = dc.ReadUint64()
-			if err != nil {
-				err = msgp.WrapError(err, "Hash")
-				return
-			}
-		case "Histograms":
-			err = z.Histograms.DecodeMsg(dc)
-			if err != nil {
-				err = msgp.WrapError(err, "Histograms")
-				return
-			}
-		default:
-			err = dc.Skip()
-			if err != nil {
-				err = msgp.WrapError(err)
-				return
-			}
-		}
-	}
-	return
-}
-
-// EncodeMsg implements msgp.Encodable
-func (z *MetaSeriesBinary) EncodeMsg(en *msgp.Writer) (err error) {
-	// map header, size 6
-	// write "LabelsNames"
-	err = en.Append(0x86, 0xab, 0x4c, 0x61, 0x62, 0x65, 0x6c, 0x73, 0x4e, 0x61, 0x6d, 0x65, 0x73)
-	if err != nil {
-		return
-	}
-	err = en.WriteArrayHeader(uint32(len(z.LabelsNames)))
-	if err != nil {
-		err = msgp.WrapError(err, "LabelsNames")
-		return
-	}
-	for za0001 := range z.LabelsNames {
-		err = en.WriteInt32(z.LabelsNames[za0001])
-		if err != nil {
-			err = msgp.WrapError(err, "LabelsNames", za0001)
-			return
-		}
-	}
-	// write "LabelsValues"
-	err = en.Append(0xac, 0x4c, 0x61, 0x62, 0x65, 0x6c, 0x73, 0x56, 0x61, 0x6c, 0x75, 0x65, 0x73)
-	if err != nil {
-		return
-	}
-	err = en.WriteArrayHeader(uint32(len(z.LabelsValues)))
-	if err != nil {
-		err = msgp.WrapError(err, "LabelsValues")
-		return
-	}
-	for za0002 := range z.LabelsValues {
-		err = en.WriteInt32(z.LabelsValues[za0002])
-		if err != nil {
-			err = msgp.WrapError(err, "LabelsValues", za0002)
-			return
-		}
-	}
-	// write "TS"
-	err = en.Append(0xa2, 0x54, 0x53)
-	if err != nil {
-		return
-	}
-	err = en.WriteInt64(z.TS)
-	if err != nil {
-		err = msgp.WrapError(err, "TS")
-		return
-	}
-	// write "Value"
-	err = en.Append(0xa5, 0x56, 0x61, 0x6c, 0x75, 0x65)
-	if err != nil {
-		return
-	}
-	err = en.WriteFloat64(z.Value)
-	if err != nil {
-		err = msgp.WrapError(err, "Value")
-		return
-	}
-	// write "Hash"
-	err = en.Append(0xa4, 0x48, 0x61, 0x73, 0x68)
-	if err != nil {
-		return
-	}
-	err = en.WriteUint64(z.Hash)
-	if err != nil {
-		err = msgp.WrapError(err, "Hash")
-		return
-	}
-	// write "Histograms"
-	err = en.Append(0xaa, 0x48, 0x69, 0x73, 0x74, 0x6f, 0x67, 0x72, 0x61, 0x6d, 0x73)
-	if err != nil {
-		return
-	}
-	err = z.Histograms.EncodeMsg(en)
-	if err != nil {
-		err = msgp.WrapError(err, "Histograms")
-		return
-	}
-	return
-}
-
-// MarshalMsg implements msgp.Marshaler
-func (z *MetaSeriesBinary) MarshalMsg(b []byte) (o []byte, err error) {
-	o = msgp.Require(b, z.Msgsize())
-	// map header, size 6
-	// string "LabelsNames"
-	o = append(o, 0x86, 0xab, 0x4c, 0x61, 0x62, 0x65, 0x6c, 0x73, 0x4e, 0x61, 0x6d, 0x65, 0x73)
-	o = msgp.AppendArrayHeader(o, uint32(len(z.LabelsNames)))
-	for za0001 := range z.LabelsNames {
-		o = msgp.AppendInt32(o, z.LabelsNames[za0001])
-	}
-	// string "LabelsValues"
-	o = append(o, 0xac, 0x4c, 0x61, 0x62, 0x65, 0x6c, 0x73, 0x56, 0x61, 0x6c, 0x75, 0x65, 0x73)
-	o = msgp.AppendArrayHeader(o, uint32(len(z.LabelsValues)))
-	for za0002 := range z.LabelsValues {
-		o = msgp.AppendInt32(o, z.LabelsValues[za0002])
-	}
-	// string "TS"
-	o = append(o, 0xa2, 0x54, 0x53)
-	o = msgp.AppendInt64(o, z.TS)
-	// string "Value"
-	o = append(o, 0xa5, 0x56, 0x61, 0x6c, 0x75, 0x65)
-	o = msgp.AppendFloat64(o, z.Value)
-	// string "Hash"
-	o = append(o, 0xa4, 0x48, 0x61, 0x73, 0x68)
-	o = msgp.AppendUint64(o, z.Hash)
-	// string "Histograms"
-	o = append(o, 0xaa, 0x48, 0x69, 0x73, 0x74, 0x6f, 0x67, 0x72, 0x61, 0x6d, 0x73)
-	o, err = z.Histograms.MarshalMsg(o)
-	if err != nil {
-		err = msgp.WrapError(err, "Histograms")
-		return
-	}
-	return
-}
-
-// UnmarshalMsg implements msgp.Unmarshaler
-func (z *MetaSeriesBinary) UnmarshalMsg(bts []byte) (o []byte, err error) {
-	var field []byte
-	_ = field
-	var zb0001 uint32
-	zb0001, bts, err = msgp.ReadMapHeaderBytes(bts)
-	if err != nil {
-		err = msgp.WrapError(err)
-		return
-	}
-	for zb0001 > 0 {
-		zb0001--
-		field, bts, err = msgp.ReadMapKeyZC(bts)
-		if err != nil {
-			err = msgp.WrapError(err)
-			return
-		}
-		switch msgp.UnsafeString(field) {
-		case "LabelsNames":
-			var zb0002 uint32
-			zb0002, bts, err = msgp.ReadArrayHeaderBytes(bts)
-			if err != nil {
-				err = msgp.WrapError(err, "LabelsNames")
-				return
-			}
-			if cap(z.LabelsNames) >= int(zb0002) {
-				z.LabelsNames = (z.LabelsNames)[:zb0002]
-			} else {
-				z.LabelsNames = make([]int32, zb0002)
-			}
-			for za0001 := range z.LabelsNames {
-				z.LabelsNames[za0001], bts, err = msgp.ReadInt32Bytes(bts)
-				if err != nil {
-					err = msgp.WrapError(err, "LabelsNames", za0001)
-					return
-				}
-			}
-		case "LabelsValues":
-			var zb0003 uint32
-			zb0003, bts, err = msgp.ReadArrayHeaderBytes(bts)
-			if err != nil {
-				err = msgp.WrapError(err, "LabelsValues")
-				return
-			}
-			if cap(z.LabelsValues) >= int(zb0003) {
-				z.LabelsValues = (z.LabelsValues)[:zb0003]
-			} else {
-				z.LabelsValues = make([]int32, zb0003)
-			}
-			for za0002 := range z.LabelsValues {
-				z.LabelsValues[za0002], bts, err = msgp.ReadInt32Bytes(bts)
-				if err != nil {
-					err = msgp.WrapError(err, "LabelsValues", za0002)
-					return
-				}
-			}
-		case "TS":
-			z.TS, bts, err = msgp.ReadInt64Bytes(bts)
-			if err != nil {
-				err = msgp.WrapError(err, "TS")
-				return
-			}
-		case "Value":
-			z.Value, bts, err = msgp.ReadFloat64Bytes(bts)
-			if err != nil {
-				err = msgp.WrapError(err, "Value")
-				return
-			}
-		case "Hash":
-			z.Hash, bts, err = msgp.ReadUint64Bytes(bts)
-			if err != nil {
-				err = msgp.WrapError(err, "Hash")
-				return
-			}
-		case "Histograms":
-			bts, err = z.Histograms.UnmarshalMsg(bts)
-			if err != nil {
-				err = msgp.WrapError(err, "Histograms")
-				return
-			}
-		default:
-			bts, err = msgp.Skip(bts)
-			if err != nil {
-				err = msgp.WrapError(err)
-				return
-			}
-		}
-	}
-	o = bts
-	return
-}
-
-// Msgsize returns an upper bound estimate of the number of bytes occupied by the serialized message
-func (z *MetaSeriesBinary) Msgsize() (s int) {
-	s = 1 + 12 + msgp.ArrayHeaderSize + (len(z.LabelsNames) * (msgp.Int32Size)) + 13 + msgp.ArrayHeaderSize + (len(z.LabelsValues) * (msgp.Int32Size)) + 3 + msgp.Int64Size + 6 + msgp.Float64Size + 5 + msgp.Uint64Size + 11 + z.Histograms.Msgsize()
-	return
-}
-
-// DecodeMsg implements msgp.Decodable
 func (z *SeriesGroup) DecodeMsg(dc *msgp.Reader) (err error) {
 	var field []byte
 	_ = field
@@ -3015,7 +2711,7 @@ func (z *SeriesGroup) DecodeMsg(dc *msgp.Reader) (err error) {
 			if cap(z.Metadata) >= int(zb0004) {
 				z.Metadata = (z.Metadata)[:zb0004]
 			} else {
-				z.Metadata = make([]*MetaSeriesBinary, zb0004)
+				z.Metadata = make([]*TimeSeriesBinary, zb0004)
 			}
 			for za0003 := range z.Metadata {
 				if dc.IsNil() {
@@ -3027,7 +2723,7 @@ func (z *SeriesGroup) DecodeMsg(dc *msgp.Reader) (err error) {
 					z.Metadata[za0003] = nil
 				} else {
 					if z.Metadata[za0003] == nil {
-						z.Metadata[za0003] = new(MetaSeriesBinary)
+						z.Metadata[za0003] = new(TimeSeriesBinary)
 					}
 					err = z.Metadata[za0003].DecodeMsg(dc)
 					if err != nil {
@@ -3236,7 +2932,7 @@ func (z *SeriesGroup) UnmarshalMsg(bts []byte) (o []byte, err error) {
 			if cap(z.Metadata) >= int(zb0004) {
 				z.Metadata = (z.Metadata)[:zb0004]
 			} else {
-				z.Metadata = make([]*MetaSeriesBinary, zb0004)
+				z.Metadata = make([]*TimeSeriesBinary, zb0004)
 			}
 			for za0003 := range z.Metadata {
 				if msgp.IsNil(bts) {
@@ -3247,7 +2943,7 @@ func (z *SeriesGroup) UnmarshalMsg(bts []byte) (o []byte, err error) {
 					z.Metadata[za0003] = nil
 				} else {
 					if z.Metadata[za0003] == nil {
-						z.Metadata[za0003] = new(MetaSeriesBinary)
+						z.Metadata[za0003] = new(TimeSeriesBinary)
 					}
 					bts, err = z.Metadata[za0003].UnmarshalMsg(bts)
 					if err != nil {

@@ -14,21 +14,12 @@ import (
 type SeriesGroup struct {
 	Strings  []string
 	Series   []*TimeSeriesBinary
-	Metadata []*MetaSeriesBinary
+	Metadata []*TimeSeriesBinary
 }
 
 type TimeSeriesBinary struct {
 	// Labels are not serialized but are passed in.
 	Labels       labels.Labels `msg:"-"`
-	LabelsNames  []int32
-	LabelsValues []int32
-	TS           int64
-	Value        float64
-	Hash         uint64
-	Histograms   Histograms
-}
-
-type MetaSeriesBinary struct {
 	LabelsNames  []int32
 	LabelsValues []int32
 	TS           int64
