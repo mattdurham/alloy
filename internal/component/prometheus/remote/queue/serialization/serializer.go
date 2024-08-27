@@ -15,7 +15,7 @@ import (
 // serializer will trigger based on the last flush duration OR if it hits a certain amount of items.
 type serializer struct {
 	inbox               actor.Mailbox[*types.TimeSeriesBinary]
-	metaInbox           actor.Mailbox[*types.MetaSeriesBinary]
+	metaInbox           actor.Mailbox[*types.TimeSeriesBinary]
 	maxItemsBeforeFlush int
 	flushDuration       time.Duration
 	queue               types.FileStorage
@@ -24,7 +24,7 @@ type serializer struct {
 	self                actor.Actor
 	flushTestTimer      *time.Ticker
 	series              []*types.TimeSeriesBinary
-	meta                []*types.MetaSeriesBinary
+	meta                []*types.TimeSeriesBinary
 	msgpBuffer          []byte
 }
 
@@ -36,7 +36,7 @@ func NewSerializer(maxItemsBeforeFlush int, flushDuration time.Duration, q types
 		series:              make([]*types.TimeSeriesBinary, 0),
 		logger:              l,
 		inbox:               actor.NewMailbox[*types.TimeSeriesBinary](),
-		metaInbox:           actor.NewMailbox[*types.MetaSeriesBinary](),
+		metaInbox:           actor.NewMailbox[*types.TimeSeriesBinary](),
 		flushTestTimer:      time.NewTicker(1 * time.Second),
 		msgpBuffer:          make([]byte, 0),
 		lastFlush:           time.Now(),
@@ -59,7 +59,7 @@ func (s *serializer) SendSeries(ctx context.Context, data *types.TimeSeriesBinar
 	return s.inbox.Send(ctx, data)
 }
 
-func (s *serializer) SendMetadata(ctx context.Context, data *types.MetaSeriesBinary) error {
+func (s *serializer) SendMetadata(ctx context.Context, data *types.TimeSeriesBinary) error {
 	return s.metaInbox.Send(ctx, data)
 }
 func (s *serializer) DoWork(ctx actor.Context) actor.WorkerStatus {
@@ -86,7 +86,7 @@ func (s *serializer) DoWork(ctx actor.Context) actor.WorkerStatus {
 	}
 }
 
-func (s *serializer) AppendMetadata(ctx actor.Context, data *types.MetaSeriesBinary) error {
+func (s *serializer) AppendMetadata(ctx actor.Context, data *types.TimeSeriesBinary) error {
 
 	s.meta = append(s.meta, data)
 	// If we would go over the max size then send, or if we have hit the flush duration then send.
@@ -117,7 +117,7 @@ func (s *serializer) store(ctx actor.Context) error {
 	}
 	group := &types.SeriesGroup{
 		Series:   make([]*types.TimeSeriesBinary, len(s.series)),
-		Metadata: make([]*types.MetaSeriesBinary, len(s.meta)),
+		Metadata: make([]*types.TimeSeriesBinary, len(s.meta)),
 	}
 	defer func() {
 		types.PutTimeSeriesBinarySlice(s.series)

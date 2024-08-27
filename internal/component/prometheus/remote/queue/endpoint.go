@@ -96,7 +96,7 @@ func (ep *endpoint) deserializeAndSend(ctx context.Context, meta map[string]stri
 	stringsCount, _ := strconv.Atoi(meta["strings_count"])
 	sg := &types.SeriesGroup{
 		Series:   make([]*types.TimeSeriesBinary, seriesCount),
-		Metadata: make([]*types.MetaSeriesBinary, metaCount),
+		Metadata: make([]*types.TimeSeriesBinary, metaCount),
 		Strings:  make([]string, stringsCount),
 	}
 	for i := 0; i < seriesCount; i++ {
@@ -122,11 +122,11 @@ func (ep *endpoint) deserializeAndSend(ctx context.Context, meta map[string]stri
 			level.Error(ep.log).Log("msg", "error sending to write client", "err", sendErr)
 		}
 	}
-	/*
-		for _, md := range sg.Metadata {
-			sendErr := ep.network.SendMetadata(context.Background(), md)
-			if sendErr != nil {
-				level.Error(ep.log).Log("msg", "error sending metadata to write client", "err", sendErr)
-			}
-		}*/
+
+	for _, md := range sg.Metadata {
+		sendErr := ep.network.SendMetadata(context.Background(), md)
+		if sendErr != nil {
+			level.Error(ep.log).Log("msg", "error sending metadata to write client", "err", sendErr)
+		}
+	}
 }

@@ -15,7 +15,6 @@ import (
 )
 
 const remoteSamples = "prometheus_remote_storage_samples_total"
-const remoteExemplars = "prometheus_remote_storage_exemplars_total"
 const remoteHistograms = "prometheus_remote_storage_histograms_total"
 const remoteMetadata = "prometheus_remote_storage_metadata_total"
 
@@ -27,13 +26,12 @@ const inTimestamp = "prometheus_remote_storage_highest_timestamp_in_seconds"
 
 const failedSample = "prometheus_remote_storage_samples_failed_total"
 const failedHistogram = "prometheus_remote_storage_histograms_failed_total"
-const failedExemplar = "prometheus_remote_storage_exemplars_failed_total"
 const failedMetadata = "prometheus_remote_storage_metadata_failed_total"
 
 const retriedSamples = "prometheus_remote_storage_samples_retried_total"
-const retriedExemplars = "prometheus_remote_storage_exemplars_retried_total"
 const retriedHistogram = "prometheus_remote_storage_histograms_retried_total"
 const retriedMetadata = "prometheus_remote_storage_metadata_retried_total"
+
 const prometheusDuration = "prometheus_remote_storage_queue_duration_seconds"
 
 const filequeueIncoming = "alloy_queue_series_filequeue_incoming_series"
@@ -290,18 +288,18 @@ func TestMetrics(t *testing.T) {
 				},
 			},
 		},
-		// exemplar
+		// exemplar, note that once it hits the appender exemplars are treated the same as series.
 		{
 			name:             "exemplar success",
 			returnStatusCode: http.StatusOK,
-			dtype:            Exemplars,
+			dtype:            Exemplar,
 			checks: []check{
 				{
 					name:  filequeueIncoming,
 					value: 10,
 				},
 				{
-					name:  remoteExemplars,
+					name:  remoteSamples,
 					value: 10,
 				},
 				{
@@ -337,7 +335,7 @@ func TestMetrics(t *testing.T) {
 		{
 			name:             "exemplar failure",
 			returnStatusCode: http.StatusBadRequest,
-			dtype:            Exemplars,
+			dtype:            Exemplar,
 			checks: []check{
 				{
 					name:  alloyFailures,
@@ -348,7 +346,7 @@ func TestMetrics(t *testing.T) {
 					value: 10,
 				},
 				{
-					name:  failedExemplar,
+					name:  failedSample,
 					value: 10,
 				},
 				{
@@ -372,14 +370,14 @@ func TestMetrics(t *testing.T) {
 		{
 			name:             "exemplar retry",
 			returnStatusCode: http.StatusTooManyRequests,
-			dtype:            Exemplars,
+			dtype:            Exemplar,
 			checks: []check{
 				{
 					name:  filequeueIncoming,
 					value: 10,
 				},
 				{
-					name: retriedExemplars,
+					name: retriedSamples,
 					// This will be more than 10 since it retries in a loop.
 					valueFunc: greaterThenZero,
 				},
@@ -411,173 +409,6 @@ func TestMetrics(t *testing.T) {
 				},
 			},
 		},
-		// histogram tests
-		/*
-			{
-				name:             "sample failure",
-				returnStatusCode: http.StatusBadRequest,
-				dtype:            Sample,
-				check: func(metrics map[string]float64) map[string]float64 {
-					metrics = checkValue(t, failedSample, 10, metrics)
-					// In is the incoming to the queue so should not be affected by the failure or success of
-					// the network.
-					metrics = checkValueCondition(t, inTimestamp, func(v float64) bool {
-						require.True(t, v > 0)
-						unixTime := time.Unix(int64(v), 0)
-						require.True(t, v > 0)
-						require.True(t, time.Since(unixTime) < 10*time.Second)
-						return true
-					}, metrics)
-					return metrics
-				},
-			},
-			{
-				name:             "sample retry",
-				returnStatusCode: http.StatusTooManyRequests,
-				dtype:            Sample,
-				check: func(metrics map[string]float64) map[string]float64 {
-					// We should get some retries here
-					metrics = checkValueCondition(t, retriedSamples, func(f float64) bool {
-						return f > 0
-					}, metrics)
-					// In is the incoming to the queue so should not be affected by the failure or success of
-					// the network.
-					metrics = checkValueCondition(t, inTimestamp, func(v float64) bool {
-						require.True(t, v > 0)
-						unixTime := time.Unix(int64(v), 0)
-						require.True(t, v > 0)
-						require.True(t, time.Since(unixTime) < 10*time.Second)
-						return true
-					}, metrics)
-					return metrics
-				},
-			},
-			{
-				name:             "histogram success",
-				returnStatusCode: http.StatusOK,
-				dtype:            Histogram,
-				check: func(metrics map[string]float64) map[string]float64 {
-					checkValue(t, remoteHistograms, 10, metrics)
-					checkValueCondition(t, sentBytes, func(v float64) bool { return v > 0 }, metrics)
-					checkValueCondition(t, outTimestamp, func(v float64) bool {
-						require.True(t, v > 0)
-						unixTime := time.Unix(int64(v), 0)
-						require.True(t, v > 0)
-						require.True(t, time.Since(unixTime) < 10*time.Second)
-						return true
-					}, metrics)
-					checkValueCondition(t, inTimestamp, func(v float64) bool {
-						require.True(t, v > 0)
-						unixTime := time.Unix(int64(v), 0)
-						require.True(t, v > 0)
-						require.True(t, time.Since(unixTime) < 10*time.Second)
-						return true
-					}, metrics)
-				},
-			},
-			{
-				name:             "histogram failure",
-				returnStatusCode: http.StatusBadRequest,
-				dtype:            Histogram,
-				check: func(metrics map[string]float64) map[string]float64 {
-					metrics = checkValue(t, failedHistogram, 10, metrics)
-					// In is the incoming to the queue so should not be affected by the failure or success of
-					// the network.
-					metrics = checkValueCondition(t, inTimestamp, func(v float64) bool {
-						require.True(t, v > 0)
-						unixTime := time.Unix(int64(v), 0)
-						require.True(t, v > 0)
-						require.True(t, time.Since(unixTime) < 10*time.Second)
-						return true
-					}, metrics)
-					return metrics
-				},
-			},
-			{
-				name:             "histogram retry",
-				returnStatusCode: http.StatusTooManyRequests,
-				dtype:            Histogram,
-				check: func(metrics map[string]float64) map[string]float64 {
-					// We should get some retries here
-					metrics = checkValueCondition(t, retriedHistogram, func(f float64) bool {
-						return f > 0
-					}, metrics)
-					// In is the incoming to the queue so should not be affected by the failure or success of
-					// the network.
-					metrics = checkValueCondition(t, inTimestamp, func(v float64) bool {
-						require.True(t, v > 0)
-						unixTime := time.Unix(int64(v), 0)
-						require.True(t, v > 0)
-						require.True(t, time.Since(unixTime) < 10*time.Second)
-						return true
-					}, metrics)
-					return metrics
-				},
-			},
-			// Exemplars
-			{
-				name:             "exemplar success",
-				returnStatusCode: http.StatusOK,
-				dtype:            Histogram,
-				check: func(metrics map[string]float64) map[string]float64 {
-					metrics = checkValue(t, remoteHistograms, 10, metrics)
-					metrics = checkValueCondition(t, sentBytes, func(v float64) bool { return v > 0 }, metrics)
-					metrics = checkValueCondition(t, outTimestamp, func(v float64) bool {
-						require.True(t, v > 0)
-						unixTime := time.Unix(int64(v), 0)
-						require.True(t, v > 0)
-						require.True(t, time.Since(unixTime) < 10*time.Second)
-						return true
-					}, metrics)
-					metrics = checkValueCondition(t, inTimestamp, func(v float64) bool {
-						require.True(t, v > 0)
-						unixTime := time.Unix(int64(v), 0)
-						require.True(t, v > 0)
-						require.True(t, time.Since(unixTime) < 10*time.Second)
-						return true
-					}, metrics)
-					return metrics
-				},
-			},
-			{
-				name:             "exemplar failure",
-				returnStatusCode: http.StatusBadRequest,
-				dtype:            Histogram,
-				check: func(metrics map[string]float64) map[string]float64 {
-					metrics = checkValue(t, failedHistogram, 10, metrics)
-					// In is the incoming to the queue so should not be affected by the failure or success of
-					// the network.
-					metrics = checkValueCondition(t, inTimestamp, func(v float64) bool {
-						require.True(t, v > 0)
-						unixTime := time.Unix(int64(v), 0)
-						require.True(t, v > 0)
-						require.True(t, time.Since(unixTime) < 10*time.Second)
-						return true
-					}, metrics)
-					return metrics
-				},
-			},
-			{
-				name:             "exemplar retry",
-				returnStatusCode: http.StatusTooManyRequests,
-				dtype:            Histogram,
-				check: func(metrics map[string]float64) map[string]float64 {
-					// We should get some retries here
-					metrics = checkValueCondition(t, retriedHistogram, func(f float64) bool {
-						return f > 0
-					}, metrics)
-					// In is the incoming to the queue so should not be affected by the failure or success of
-					// the network.
-					metrics = checkValueCondition(t, inTimestamp, func(v float64) bool {
-						require.True(t, v > 0)
-						unixTime := time.Unix(int64(v), 0)
-						require.True(t, v > 0)
-						require.True(t, time.Since(unixTime) < 10*time.Second)
-						return true
-					}, metrics)
-					return metrics
-				},
-			},*/
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -597,10 +428,7 @@ func isReasonableTimeStamp(v float64) bool {
 	}
 	unixTime := time.Unix(int64(v), 0)
 
-	if !(time.Since(unixTime) < 10*time.Second) {
-		return false
-	}
-	return true
+	return time.Since(unixTime) < 10*time.Second
 }
 
 type dataType int
@@ -608,7 +436,7 @@ type dataType int
 const (
 	Sample dataType = iota
 	Histogram
-	Exemplars
+	Exemplar
 	Metadata
 )
 
@@ -650,16 +478,22 @@ func runE2eStats(t *testing.T, test statsTest) {
 		app := exp.Receiver.Appender(ctx)
 		for j := 0; j < 10; j++ {
 			index++
-			if test.dtype == Sample {
+			switch test.dtype {
+			case Sample:
 				ts, v, lbls := makeSeries(index)
 				_, errApp := app.Append(0, lbls, ts, v)
 				require.NoError(t, errApp)
-			} else if test.dtype == Histogram {
+			case Histogram:
 				ts, lbls, h := makeHistogram(index)
 				_, errApp := app.AppendHistogram(0, lbls, ts, h, nil)
 				require.NoError(t, errApp)
+			case Exemplar:
+				ex := makeExemplar(index)
+				_, errApp := app.AppendExemplar(0, nil, ex)
+				require.NoError(t, errApp)
+			default:
+				require.True(t, false)
 			}
-
 		}
 		require.NoError(t, app.Commit())
 	}()

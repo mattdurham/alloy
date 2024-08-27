@@ -70,21 +70,26 @@ func (a *appender) Rollback() error {
 	return nil
 }
 
-// AppendExemplar appends exemplar to cache.
-func (a *appender) AppendExemplar(ref storage.SeriesRef, l labels.Labels, e exemplar.Exemplar) (_ storage.SeriesRef, _ error) {
+// AppendExemplar appends exemplar to cache. The passed in labels is unused, instead use the labels on the exemplar.
+func (a *appender) AppendExemplar(ref storage.SeriesRef, _ labels.Labels, e exemplar.Exemplar) (_ storage.SeriesRef, _ error) {
 	endTime := time.Now().UTC().Unix() - int64(a.ttl.Seconds())
 	if e.HasTs && e.Ts < endTime {
 		return ref, nil
 	}
-	/*
-		ex := prompb.Exemplar{}
-		ex.Value = e.Value
-		ex.Timestamp = e.Ts
-		hash := l.Hash()
-		ts := types.GetTimeSeries()
-		ts.Hash = hash
-		ts.TS = ex.Timestamp
-		ts.AddLabels(l)*/
+
+	ts := types.GetTimeSeriesBinary()
+	ts.Hash = e.Labels.Hash()
+	ts.TS = e.Ts
+	ts.Labels = e.Labels
+	ts.Hash = e.Labels.Hash()
+	err := a.s.SendSeries(context.Background(), ts)
+	if err != nil {
+		return ref, err
+	}
+	a.stats(types.FileQueueStats{
+		SeriesStored:    1,
+		NewestTimestamp: e.Ts,
+	})
 	return ref, nil
 }
 
@@ -103,7 +108,11 @@ func (a *appender) AppendHistogram(ref storage.SeriesRef, l labels.Labels, t int
 		ts.FromFloatHistogram(t, fh)
 	}
 	ts.Hash = l.Hash()
-	a.s.SendSeries(context.Background(), ts)
+	err := a.s.SendSeries(context.Background(), ts)
+	if err != nil {
+		return ref, err
+	}
+	// TODO move this to the filequeue.
 	a.stats(types.FileQueueStats{
 		SeriesStored:    1,
 		NewestTimestamp: t,
@@ -113,31 +122,22 @@ func (a *appender) AppendHistogram(ref storage.SeriesRef, l labels.Labels, t int
 
 // UpdateMetadata updates metadata.
 func (a *appender) UpdateMetadata(ref storage.SeriesRef, l labels.Labels, m metadata.Metadata) (_ storage.SeriesRef, _ error) {
-	return 0, nil
-	/*
-		var name string
-		for _, lbl := range l {
-			if lbl.Name == "__name__" {
-				name = lbl.Name
-				break
-			}
-		}
-		if name == "" {
-			return ref, fmt.Errorf("unable to find name for metadata")
-		}
-		md := prompb.MetricMetadata{
-			Type: prompb.MetricMetadata_MetricType(prompb.MetricMetadata_MetricType_value[string(m.Type)]),
-			Help: m.Help,
-			Unit: m.Unit,
-		}
-
-		md.MetricFamilyName = name
-		a.data = append(a.data, types.TimeSeries{
-			Hash:   hash,
-			TS:     ex.Timestamp,
-			Labels: l,
-		})
-		return ref, nil
-	*/
-
+	ts := types.GetTimeSeriesBinary()
+	// We are going to handle converting some strings to hopefully not reused label names.
+	combinedLabels := l.Copy()
+	combinedLabels = append(combinedLabels, labels.Label{
+		Name:  "__metadata_type__",
+		Value: string(m.Type),
+	})
+	combinedLabels = append(combinedLabels, labels.Label{
+		Name:  "__metadata_help__",
+		Value: m.Help,
+	})
+	combinedLabels = append(combinedLabels, labels.Label{
+		Name:  "__metadata_unit__",
+		Value: m.Unit,
+	})
+	ts.Labels = combinedLabels
+	a.s.SendMetadata(context.Background(), ts)
+	return ref, nil
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/grafana/alloy/internal/runtime/logging"
 	"github.com/grafana/alloy/internal/util"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/prompb"
@@ -200,6 +201,14 @@ func makeSeries(index int) (int64, float64, labels.Labels) {
 
 func makeHistogram(index int) (int64, labels.Labels, *histogram.Histogram) {
 	return time.Now().UTC().Unix(), labels.FromStrings(fmt.Sprintf("name_%d", index), fmt.Sprintf("value_%d", index)), hist(index)
+}
+func makeExemplar(index int) exemplar.Exemplar {
+	return exemplar.Exemplar{
+		Labels: labels.FromStrings(fmt.Sprintf("name_%d", index), fmt.Sprintf("value_%d", index)),
+		Ts:     time.Now().Unix(),
+		HasTs:  true,
+		Value:  float64(index),
+	}
 }
 
 func hist(i int) *histogram.Histogram {

@@ -16,7 +16,7 @@ type manager struct {
 	metadata        *loop
 	logger          log.Logger
 	inbox           actor.Mailbox[*types.TimeSeriesBinary]
-	metaInbox       actor.Mailbox[*types.MetaSeriesBinary]
+	metaInbox       actor.Mailbox[*types.TimeSeriesBinary]
 	self            actor.Actor
 	cfg             ConnectionConfig
 	stats           func(types.NetworkStats)
@@ -35,7 +35,7 @@ func New(cc ConnectionConfig, logger log.Logger, seriesStats, metadataStats func
 		// This provides blocking to only handle one at a time, so that if a queue blocks
 		// it will stop the filequeue from feeding more.
 		inbox:     actor.NewMailbox[*types.TimeSeriesBinary](actor.OptCapacity(1)),
-		metaInbox: actor.NewMailbox[*types.MetaSeriesBinary](actor.OptCapacity(1)),
+		metaInbox: actor.NewMailbox[*types.TimeSeriesBinary](actor.OptCapacity(1)),
 		stats:     seriesStats,
 	}
 
@@ -69,7 +69,7 @@ func (s *manager) SendSeries(ctx context.Context, data *types.TimeSeriesBinary) 
 	return s.inbox.Send(ctx, data)
 }
 
-func (s *manager) SendMetadata(ctx context.Context, data *types.MetaSeriesBinary) error {
+func (s *manager) SendMetadata(ctx context.Context, data *types.TimeSeriesBinary) error {
 	return s.metaInbox.Send(ctx, data)
 }
 
