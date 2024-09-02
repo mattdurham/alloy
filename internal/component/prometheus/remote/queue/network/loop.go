@@ -118,7 +118,7 @@ func (l *loop) DoWork(ctx actor.Context) actor.WorkerStatus {
 			return actor.WorkerContinue
 		}
 		if time.Since(l.lastSend) > l.flushTimer {
-			l.trySend()
+			l.trySend(ctx)
 		}
 		return actor.WorkerContinue
 	case series, ok := <-l.seriesMbx.ReceiveC():
@@ -127,18 +127,18 @@ func (l *loop) DoWork(ctx actor.Context) actor.WorkerStatus {
 		}
 		l.series = append(l.series, series)
 		if len(l.series) >= l.batchCount {
-			l.trySend()
+			l.trySend(ctx)
 		}
 		return actor.WorkerContinue
 	}
 }
 
 // trySend is the core functionality for sending data to a endpoint. It will attempt retries as defined in MaxRetryBackoffAttempts.
-func (l *loop) trySend() {
+func (l *loop) trySend(ctx context.Context) {
 	attempts := 0
 attempt:
 	start := time.Now()
-	result := l.send(attempts)
+	result := l.send(ctx, attempts)
 	duration := time.Since(start)
 	l.statsFunc(types.NetworkStats{
 		SendDuration: duration,
@@ -157,6 +157,7 @@ attempt:
 		l.finishSending()
 		return
 	}
+	// This helps us short circuit the loop if we are stopping.
 	if l.stopCalled.Load() {
 		return
 	}
@@ -177,7 +178,7 @@ func (l *loop) finishSending() {
 	l.lastSend = time.Now()
 }
 
-func (l *loop) send(retryCount int) sendResult {
+func (l *loop) send(ctx context.Context, retryCount int) sendResult {
 	result := sendResult{}
 	var networkError bool
 	var statusCode int
@@ -209,7 +210,6 @@ func (l *loop) send(retryCount int) sendResult {
 	if retryCount > 0 {
 		httpReq.Header.Set("Retry-Attempt", strconv.Itoa(retryCount))
 	}
-	ctx := context.Background()
 	ctx, cncl := context.WithTimeout(ctx, l.cfg.Timeout)
 	defer cncl()
 	resp, err := l.client.Do(httpReq.WithContext(ctx))

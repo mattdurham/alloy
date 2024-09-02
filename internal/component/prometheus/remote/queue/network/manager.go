@@ -17,7 +17,7 @@ type manager struct {
 	logger          log.Logger
 	inbox           actor.Mailbox[*types.TimeSeriesBinary]
 	metaInbox       actor.Mailbox[*types.TimeSeriesBinary]
-	configIncox     actor.Mailbox[ConnectionConfig]
+	configInbox     actor.Mailbox[ConnectionConfig]
 	self            actor.Actor
 	cfg             ConnectionConfig
 	stats           func(types.NetworkStats)
@@ -37,7 +37,7 @@ func New(cc ConnectionConfig, logger log.Logger, seriesStats, metadataStats func
 		// it will stop the filequeue from feeding more.
 		inbox:       actor.NewMailbox[*types.TimeSeriesBinary](actor.OptCapacity(1)),
 		metaInbox:   actor.NewMailbox[*types.TimeSeriesBinary](actor.OptCapacity(1)),
-		configIncox: actor.NewMailbox[ConnectionConfig](),
+		configInbox: actor.NewMailbox[ConnectionConfig](),
 		stats:       seriesStats,
 	}
 
@@ -63,6 +63,7 @@ func (s *manager) Start() {
 	actors = append(actors, s.inbox)
 	actors = append(actors, s.metaInbox)
 	actors = append(actors, actor.New(s))
+	actors = append(actors, s.configInbox)
 	s.self = actor.Combine(actors...).Build()
 	s.self.Start()
 }
@@ -76,12 +77,13 @@ func (s *manager) SendMetadata(ctx context.Context, data *types.TimeSeriesBinary
 }
 
 func (s *manager) UpdateConfig(ctx context.Context, cc ConnectionConfig) error {
-	return s.configIncox.Send(ctx, cc)
+	return s.configInbox.Send(ctx, cc)
 }
 
 func (s *manager) DoWork(ctx actor.Context) actor.WorkerStatus {
+	// This acts as a priority queue, always check for configuration changes first.
 	select {
-	case cfg, ok := <-s.configIncox.ReceiveC():
+	case cfg, ok := <-s.configInbox.ReceiveC():
 		if !ok {
 			return actor.WorkerEnd
 		}
@@ -103,7 +105,7 @@ func (s *manager) DoWork(ctx actor.Context) actor.WorkerStatus {
 		if !ok {
 			return actor.WorkerEnd
 		}
-		s.metadata.seriesMbx.Send(ctx, ts)
+		_ = s.metadata.seriesMbx.Send(ctx, ts)
 		return actor.WorkerContinue
 	}
 }
@@ -113,7 +115,8 @@ func (s *manager) updateConfig(cc ConnectionConfig) {
 	if s.cfg.Equals(cc) {
 		return
 	}
-	// TODO @mattdurham make this smarter.
+	// TODO @mattdurham make this smarter, at the moment any samples in the loops are lost.
+	// Ideally we would drain the queues and re add them but that is a future need.
 
 	// For the moment we will stop all the items and recreate them.
 	for _, l := range s.loops {
@@ -144,8 +147,8 @@ func (s *manager) Stop() {
 }
 
 // Queue adds anything thats not metadata to the queue.
-func (s *manager) Queue(ctx context.Context, d *types.TimeSeriesBinary) {
+func (s *manager) Queue(ctx context.Context, ts *types.TimeSeriesBinary) {
 	// Based on a hash which is the label hash add to the queue.
-	queueNum := d.Hash % s.connectionCount
-	_ = s.loops[queueNum].seriesMbx.Send(ctx, d)
+	queueNum := ts.Hash % s.connectionCount
+	_ = s.loops[queueNum].seriesMbx.Send(ctx, ts)
 }
