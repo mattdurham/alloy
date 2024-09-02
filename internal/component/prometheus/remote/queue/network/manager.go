@@ -17,6 +17,7 @@ type manager struct {
 	logger          log.Logger
 	inbox           actor.Mailbox[*types.TimeSeriesBinary]
 	metaInbox       actor.Mailbox[*types.TimeSeriesBinary]
+	configIncox     actor.Mailbox[ConnectionConfig]
 	self            actor.Actor
 	cfg             ConnectionConfig
 	stats           func(types.NetworkStats)
@@ -34,9 +35,10 @@ func New(cc ConnectionConfig, logger log.Logger, seriesStats, metadataStats func
 		logger:          logger,
 		// This provides blocking to only handle one at a time, so that if a queue blocks
 		// it will stop the filequeue from feeding more.
-		inbox:     actor.NewMailbox[*types.TimeSeriesBinary](actor.OptCapacity(1)),
-		metaInbox: actor.NewMailbox[*types.TimeSeriesBinary](actor.OptCapacity(1)),
-		stats:     seriesStats,
+		inbox:       actor.NewMailbox[*types.TimeSeriesBinary](actor.OptCapacity(1)),
+		metaInbox:   actor.NewMailbox[*types.TimeSeriesBinary](actor.OptCapacity(1)),
+		configIncox: actor.NewMailbox[ConnectionConfig](),
+		stats:       seriesStats,
 	}
 
 	// start kicks off a number of concurrent connections.
@@ -73,22 +75,35 @@ func (s *manager) SendMetadata(ctx context.Context, data *types.TimeSeriesBinary
 	return s.metaInbox.Send(ctx, data)
 }
 
+func (s *manager) UpdateConfig(ctx context.Context, cc ConnectionConfig) error {
+	return s.configIncox.Send(ctx, cc)
+}
+
 func (s *manager) DoWork(ctx actor.Context) actor.WorkerStatus {
+	select {
+	case cfg, ok := <-s.configIncox.ReceiveC():
+		if !ok {
+			return actor.WorkerEnd
+		}
+		s.updateConfig(cfg)
+		return actor.WorkerContinue
+	default:
+	}
 	select {
 	case <-ctx.Done():
 		s.Stop()
 		return actor.WorkerEnd
-	case item, ok := <-s.inbox.ReceiveC():
+	case ts, ok := <-s.inbox.ReceiveC():
 		if !ok {
 			return actor.WorkerEnd
 		}
-		s.Queue(ctx, item)
+		s.Queue(ctx, ts)
 		return actor.WorkerContinue
-	case _, ok := <-s.metaInbox.ReceiveC():
+	case ts, ok := <-s.metaInbox.ReceiveC():
 		if !ok {
 			return actor.WorkerEnd
 		}
-		//s.QueueMetadata(ctx, item.Buffer)
+		s.metadata.seriesMbx.Send(ctx, ts)
 		return actor.WorkerContinue
 	}
 }
