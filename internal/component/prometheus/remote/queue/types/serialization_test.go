@@ -25,11 +25,11 @@ func TestLabels(t *testing.T) {
 	sg.Series[0] = GetTimeSeriesBinary()
 	defer PutTimeSeriesBinary(sg.Series[0])
 	sg.Series[0].Labels = labels.FromMap(lblsMap)
-	strMap := make(map[string]int32)
+	strMap := make(map[string]uint32)
 
-	index := int32(0)
+	index := uint32(0)
 	index = FillBinary(sg.Series[0], strMap, index)
-	require.True(t, index == int32(len(unique)))
+	require.True(t, index == uint32(len(unique)))
 	stringsSlice := make([]string, len(strMap))
 	for k, v := range strMap {
 		stringsSlice[v] = k

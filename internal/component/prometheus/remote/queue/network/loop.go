@@ -314,7 +314,10 @@ func createWriteRequest(wr *prompb.WriteRequest, series []*types.TimeSeriesBinar
 	return data.Bytes(), err
 }
 
+// recordStats determines what values to send to the stats function. This allows for any
+// number of metrics/signals libraries to be used. Prometheus, OTel, and any other.
 func (l *loop) recordStats(statusCode int, networkError bool, r sendResult, bytesSent int) {
+	// If its a network error send a fail.
 	if networkError {
 		l.statsFunc(types.NetworkStats{
 			Series: types.CategoryStats{
@@ -328,6 +331,7 @@ func (l *loop) recordStats(statusCode int, networkError bool, r sendResult, byte
 
 	}
 	if r.successful {
+		// Need to grab the newest series.
 		var newestTS int64
 		for _, ts := range l.series {
 			if ts.TS > newestTS {
@@ -336,6 +340,7 @@ func (l *loop) recordStats(statusCode int, networkError bool, r sendResult, byte
 		}
 		var sampleBytesSent int
 		var metaBytesSent int
+		// Each loop is explicitly a normal signal or metadata sender.
 		if l.isMeta {
 			metaBytesSent = bytesSent
 		} else {

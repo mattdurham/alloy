@@ -124,8 +124,8 @@ func (s *serializer) store(ctx actor.Context) error {
 		s.series = make([]*types.TimeSeriesBinary, 0)
 	}()
 
-	strMapToInt := make(map[string]int32)
-	index := int32(0)
+	strMapToInt := make(map[string]uint32)
+	index := uint32(0)
 
 	for si, ser := range s.series {
 		index = types.FillBinary(ser, strMapToInt, index)

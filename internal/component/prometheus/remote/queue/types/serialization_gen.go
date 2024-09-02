@@ -3017,10 +3017,10 @@ func (z *TimeSeriesBinary) DecodeMsg(dc *msgp.Reader) (err error) {
 			if cap(z.LabelsNames) >= int(zb0002) {
 				z.LabelsNames = (z.LabelsNames)[:zb0002]
 			} else {
-				z.LabelsNames = make([]int32, zb0002)
+				z.LabelsNames = make([]uint32, zb0002)
 			}
 			for za0001 := range z.LabelsNames {
-				z.LabelsNames[za0001], err = dc.ReadInt32()
+				z.LabelsNames[za0001], err = dc.ReadUint32()
 				if err != nil {
 					err = msgp.WrapError(err, "LabelsNames", za0001)
 					return
@@ -3036,10 +3036,10 @@ func (z *TimeSeriesBinary) DecodeMsg(dc *msgp.Reader) (err error) {
 			if cap(z.LabelsValues) >= int(zb0003) {
 				z.LabelsValues = (z.LabelsValues)[:zb0003]
 			} else {
-				z.LabelsValues = make([]int32, zb0003)
+				z.LabelsValues = make([]uint32, zb0003)
 			}
 			for za0002 := range z.LabelsValues {
-				z.LabelsValues[za0002], err = dc.ReadInt32()
+				z.LabelsValues[za0002], err = dc.ReadUint32()
 				if err != nil {
 					err = msgp.WrapError(err, "LabelsValues", za0002)
 					return
@@ -3094,7 +3094,7 @@ func (z *TimeSeriesBinary) EncodeMsg(en *msgp.Writer) (err error) {
 		return
 	}
 	for za0001 := range z.LabelsNames {
-		err = en.WriteInt32(z.LabelsNames[za0001])
+		err = en.WriteUint32(z.LabelsNames[za0001])
 		if err != nil {
 			err = msgp.WrapError(err, "LabelsNames", za0001)
 			return
@@ -3111,7 +3111,7 @@ func (z *TimeSeriesBinary) EncodeMsg(en *msgp.Writer) (err error) {
 		return
 	}
 	for za0002 := range z.LabelsValues {
-		err = en.WriteInt32(z.LabelsValues[za0002])
+		err = en.WriteUint32(z.LabelsValues[za0002])
 		if err != nil {
 			err = msgp.WrapError(err, "LabelsValues", za0002)
 			return
@@ -3168,13 +3168,13 @@ func (z *TimeSeriesBinary) MarshalMsg(b []byte) (o []byte, err error) {
 	o = append(o, 0x86, 0xab, 0x4c, 0x61, 0x62, 0x65, 0x6c, 0x73, 0x4e, 0x61, 0x6d, 0x65, 0x73)
 	o = msgp.AppendArrayHeader(o, uint32(len(z.LabelsNames)))
 	for za0001 := range z.LabelsNames {
-		o = msgp.AppendInt32(o, z.LabelsNames[za0001])
+		o = msgp.AppendUint32(o, z.LabelsNames[za0001])
 	}
 	// string "LabelsValues"
 	o = append(o, 0xac, 0x4c, 0x61, 0x62, 0x65, 0x6c, 0x73, 0x56, 0x61, 0x6c, 0x75, 0x65, 0x73)
 	o = msgp.AppendArrayHeader(o, uint32(len(z.LabelsValues)))
 	for za0002 := range z.LabelsValues {
-		o = msgp.AppendInt32(o, z.LabelsValues[za0002])
+		o = msgp.AppendUint32(o, z.LabelsValues[za0002])
 	}
 	// string "TS"
 	o = append(o, 0xa2, 0x54, 0x53)
@@ -3223,10 +3223,10 @@ func (z *TimeSeriesBinary) UnmarshalMsg(bts []byte) (o []byte, err error) {
 			if cap(z.LabelsNames) >= int(zb0002) {
 				z.LabelsNames = (z.LabelsNames)[:zb0002]
 			} else {
-				z.LabelsNames = make([]int32, zb0002)
+				z.LabelsNames = make([]uint32, zb0002)
 			}
 			for za0001 := range z.LabelsNames {
-				z.LabelsNames[za0001], bts, err = msgp.ReadInt32Bytes(bts)
+				z.LabelsNames[za0001], bts, err = msgp.ReadUint32Bytes(bts)
 				if err != nil {
 					err = msgp.WrapError(err, "LabelsNames", za0001)
 					return
@@ -3242,10 +3242,10 @@ func (z *TimeSeriesBinary) UnmarshalMsg(bts []byte) (o []byte, err error) {
 			if cap(z.LabelsValues) >= int(zb0003) {
 				z.LabelsValues = (z.LabelsValues)[:zb0003]
 			} else {
-				z.LabelsValues = make([]int32, zb0003)
+				z.LabelsValues = make([]uint32, zb0003)
 			}
 			for za0002 := range z.LabelsValues {
-				z.LabelsValues[za0002], bts, err = msgp.ReadInt32Bytes(bts)
+				z.LabelsValues[za0002], bts, err = msgp.ReadUint32Bytes(bts)
 				if err != nil {
 					err = msgp.WrapError(err, "LabelsValues", za0002)
 					return
@@ -3289,6 +3289,6 @@ func (z *TimeSeriesBinary) UnmarshalMsg(bts []byte) (o []byte, err error) {
 
 // Msgsize returns an upper bound estimate of the number of bytes occupied by the serialized message
 func (z *TimeSeriesBinary) Msgsize() (s int) {
-	s = 1 + 12 + msgp.ArrayHeaderSize + (len(z.LabelsNames) * (msgp.Int32Size)) + 13 + msgp.ArrayHeaderSize + (len(z.LabelsValues) * (msgp.Int32Size)) + 3 + msgp.Int64Size + 6 + msgp.Float64Size + 5 + msgp.Uint64Size + 11 + z.Histograms.Msgsize()
+	s = 1 + 12 + msgp.ArrayHeaderSize + (len(z.LabelsNames) * (msgp.Uint32Size)) + 13 + msgp.ArrayHeaderSize + (len(z.LabelsValues) * (msgp.Uint32Size)) + 3 + msgp.Int64Size + 6 + msgp.Float64Size + 5 + msgp.Uint64Size + 11 + z.Histograms.Msgsize()
 	return
 }

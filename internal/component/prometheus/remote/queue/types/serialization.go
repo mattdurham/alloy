@@ -20,8 +20,8 @@ type SeriesGroup struct {
 type TimeSeriesBinary struct {
 	// Labels are not serialized but are passed in.
 	Labels       labels.Labels `msg:"-"`
-	LabelsNames  []int32
-	LabelsValues []int32
+	LabelsNames  []uint32
+	LabelsValues []uint32
 	TS           int64
 	Value        float64
 	Hash         uint64
@@ -169,7 +169,7 @@ func FromPromSpan(spans []histogram.Span) []BucketSpan {
 
 // FillBinary is what does the conversion from labels.Labels to LabelNames and
 // LabelValues while filling in the string map, that is later converted to []string.
-func FillBinary(ts *TimeSeriesBinary, strMapToInt map[string]int32, index int32) int32 {
+func FillBinary(ts *TimeSeriesBinary, strMapToInt map[string]uint32, index uint32) uint32 {
 	ts.LabelsNames = alignArray(ts.LabelsNames, len(ts.Labels))
 	ts.LabelsValues = alignArray(ts.LabelsValues, len(ts.Labels))
 
@@ -194,9 +194,9 @@ func FillBinary(ts *TimeSeriesBinary, strMapToInt map[string]int32, index int32)
 	return index
 }
 
-func alignArray(lbls []int32, length int) []int32 {
+func alignArray(lbls []uint32, length int) []uint32 {
 	if cap(lbls) < length {
-		lbls = make([]int32, length)
+		lbls = make([]uint32, length)
 	} else {
 		lbls = lbls[:length]
 	}

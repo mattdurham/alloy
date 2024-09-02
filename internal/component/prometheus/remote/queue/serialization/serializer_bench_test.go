@@ -84,7 +84,7 @@ func (f *fakeSerializer) SendSeries(ctx context.Context, data *types.TimeSeriesB
 	return nil
 }
 
-func (f *fakeSerializer) SendMetadata(ctx context.Context, data *types.MetaSeriesBinary) error {
+func (f *fakeSerializer) SendMetadata(ctx context.Context, data *types.TimeSeriesBinary) error {
 	return nil
 }
 

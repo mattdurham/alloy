@@ -25,24 +25,17 @@ type queue struct {
 	directory string
 	maxIndex  int
 	logger    log.Logger
-	inbox     actor.Mailbox[types.Data]
-	out       func(ctx context.Context, dh types.DataHandle)
+	files     actor.Mailbox[types.Data]
+	// Out is where to send data when pulled from queue.
+	out func(ctx context.Context, dh types.DataHandle)
 	// existingFiles is the list of files found initially.
 	existingsFiles []string
 }
 
 func (q *queue) Start() {
-	q.self = actor.Combine(actor.New(q), q.inbox).Build()
+	q.self = actor.Combine(actor.New(q), q.files).Build()
 	q.self.Start()
-	// Queue up our existing items.
-	for _, name := range q.existingsFiles {
-		q.out(context.TODO(), types.DataHandle{
-			Name: name,
-			Get: func() (map[string]string, []byte, error) {
-				return get(name)
-			},
-		})
-	}
+
 }
 
 func (q *queue) Stop() {
@@ -80,7 +73,7 @@ func NewQueue(directory string, out func(ctx context.Context, dh types.DataHandl
 		maxIndex:       currentIndex,
 		logger:         logger,
 		out:            out,
-		inbox:          actor.NewMailbox[types.Data](),
+		files:          actor.NewMailbox[types.Data](),
 		existingsFiles: make([]string, 0),
 	}
 
@@ -93,7 +86,7 @@ func NewQueue(directory string, out func(ctx context.Context, dh types.DataHandl
 }
 
 func (q *queue) Send(ctx context.Context, meta map[string]string, data []byte) error {
-	return q.inbox.Send(ctx, types.Data{
+	return q.files.Send(ctx, types.Data{
 		Meta: meta,
 		Data: data,
 	})
@@ -115,10 +108,21 @@ func get(name string) (map[string]string, []byte, error) {
 }
 
 func (q *queue) DoWork(ctx actor.Context) actor.WorkerStatus {
+	// Queue up our existing items.
+	for _, name := range q.existingsFiles {
+		q.out(ctx, types.DataHandle{
+			Name: name,
+			Get: func() (map[string]string, []byte, error) {
+				return get(name)
+			},
+		})
+	}
+	// We only want to process existing files once.
+	q.existingsFiles = nil
 	select {
 	case <-ctx.Done():
 		return actor.WorkerEnd
-	case item, ok := <-q.inbox.ReceiveC():
+	case item, ok := <-q.files.ReceiveC():
 		if !ok {
 			return actor.WorkerEnd
 		}
@@ -149,6 +153,7 @@ func (q *queue) add(meta map[string]string, data []byte) (string, error) {
 		Meta: meta,
 		Data: data,
 	}
+	// TODO @mattdurham reuse a buffer here.
 	rBuf, err := r.MarshalMsg(nil)
 	if err != nil {
 		return "", err
@@ -160,14 +165,13 @@ func (q *queue) add(meta map[string]string, data []byte) (string, error) {
 	return name, err
 }
 
-func deleteFile(name string) {
-	_ = os.Remove(name)
-}
-
 func (q *queue) writeFile(name string, data []byte) error {
 	return os.WriteFile(name, data, 0644)
 }
 
+func deleteFile(name string) {
+	_ = os.Remove(name)
+}
 func readFile(name string) ([]byte, error) {
 	bb, err := os.ReadFile(name)
 	if err != nil {

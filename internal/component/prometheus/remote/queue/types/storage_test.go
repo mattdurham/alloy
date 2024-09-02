@@ -1,16 +1,17 @@
 package types
 
 import (
+	"testing"
+
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestStorage(t *testing.T) {
 	ts := GetTimeSeriesBinary()
 	ts.Labels = labels.FromStrings("one", "two")
-	ts.LabelsValues = make([]int32, 1)
-	ts.LabelsNames = make([]int32, 1)
+	ts.LabelsValues = make([]uint32, 1)
+	ts.LabelsNames = make([]uint32, 1)
 	ts.LabelsValues[0] = 1
 	ts.LabelsNames[0] = 2
 
