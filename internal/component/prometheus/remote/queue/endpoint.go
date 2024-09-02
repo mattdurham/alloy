@@ -124,7 +124,7 @@ func (ep *endpoint) deserializeAndSend(ctx context.Context, meta map[string]stri
 	}
 
 	for _, md := range sg.Metadata {
-		sendErr := ep.network.SendMetadata(context.Background(), md)
+		sendErr := ep.network.SendMetadata(ctx, md)
 		if sendErr != nil {
 			level.Error(ep.log).Log("msg", "error sending metadata to write client", "err", sendErr)
 		}

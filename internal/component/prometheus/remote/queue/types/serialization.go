@@ -82,6 +82,10 @@ type BucketSpan struct {
 	Length uint32
 }
 
+func (ts TimeSeriesBinary) IsMetadata() bool {
+	return ts.Labels.Has("__alloy_metadata_type__")
+}
+
 func (h *Histogram) ToPromHistogram() prompb.Histogram {
 	return prompb.Histogram{
 		Count:          &prompb.Histogram_CountInt{CountInt: h.Count.IntValue},
