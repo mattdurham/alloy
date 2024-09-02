@@ -67,7 +67,7 @@ func BenchmarkSimple(b *testing.B) {
 					wr.Stop()
 				})
 				require.NoError(b, err)
-				app := NewAppender(1*time.Minute, wr, 100, func(s types.FileQueueStats) {
+				app := NewAppender(context.Background(), 1*time.Minute, wr, 100, func(s types.FileQueueStats) {
 				}, l)
 
 				tSeries := &ts{

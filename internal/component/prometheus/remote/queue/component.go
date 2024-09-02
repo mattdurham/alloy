@@ -154,7 +154,7 @@ func (c *Queue) Appender(ctx context.Context) storage.Appender {
 
 	children := make([]storage.Appender, 0)
 	for _, ep := range c.endpoints {
-		children = append(children, serialization.NewAppender(c.args.TTL, ep.serializer, c.args.AppenderBatchSize, ep.stat.UpdateFileQueue, c.opts.Logger))
+		children = append(children, serialization.NewAppender(ctx, c.args.TTL, ep.serializer, c.args.AppenderBatchSize, ep.stat.UpdateFileQueue, c.opts.Logger))
 	}
 	return &fanout{children: children}
 }

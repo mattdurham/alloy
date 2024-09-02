@@ -14,6 +14,7 @@ import (
 )
 
 type appender struct {
+	ctx    context.Context
 	ttl    time.Duration
 	s      types.Serializer
 	logger log.Logger
@@ -27,12 +28,13 @@ func (a *appender) AppendCTZeroSample(ref storage.SeriesRef, l labels.Labels, t,
 
 // NewAppender returns an Appender that writes to a given serializer. NOTE the Appender returned writes
 // data immediately and does not honor commit or rollback.
-func NewAppender(ttl time.Duration, s types.Serializer, batchSize int, stats func(s types.FileQueueStats), logger log.Logger) storage.Appender {
+func NewAppender(ctx context.Context, ttl time.Duration, s types.Serializer, batchSize int, stats func(s types.FileQueueStats), logger log.Logger) storage.Appender {
 	app := &appender{
 		ttl:    ttl,
 		s:      s,
 		logger: logger,
 		stats:  stats,
+		ctx:    ctx,
 	}
 	return app
 }
@@ -49,7 +51,7 @@ func (a *appender) Append(ref storage.SeriesRef, l labels.Labels, t int64, v flo
 	ts.TS = t
 	ts.Value = v
 	ts.Hash = l.Hash()
-	err := a.s.SendSeries(context.Background(), ts)
+	err := a.s.SendSeries(a.ctx, ts)
 	if err != nil {
 		return ref, err
 	}
@@ -83,7 +85,7 @@ func (a *appender) AppendExemplar(ref storage.SeriesRef, _ labels.Labels, e exem
 	ts.TS = e.Ts
 	ts.Labels = e.Labels
 	ts.Hash = e.Labels.Hash()
-	err := a.s.SendSeries(context.Background(), ts)
+	err := a.s.SendSeries(a.ctx, ts)
 	if err != nil {
 		return ref, err
 	}
@@ -109,7 +111,7 @@ func (a *appender) AppendHistogram(ref storage.SeriesRef, l labels.Labels, t int
 		ts.FromFloatHistogram(t, fh)
 	}
 	ts.Hash = l.Hash()
-	err := a.s.SendSeries(context.Background(), ts)
+	err := a.s.SendSeries(a.ctx, ts)
 	if err != nil {
 		return ref, err
 	}
@@ -127,18 +129,18 @@ func (a *appender) UpdateMetadata(ref storage.SeriesRef, l labels.Labels, m meta
 	// We are going to handle converting some strings to hopefully not reused label names.
 	combinedLabels := l.Copy()
 	combinedLabels = append(combinedLabels, labels.Label{
-		Name:  "__metadata_type__",
+		Name:  "__alloy_metadata_type__",
 		Value: string(m.Type),
 	})
 	combinedLabels = append(combinedLabels, labels.Label{
-		Name:  "__metadata_help__",
+		Name:  "__alloy_metadata_help__",
 		Value: m.Help,
 	})
 	combinedLabels = append(combinedLabels, labels.Label{
-		Name:  "__metadata_unit__",
+		Name:  "__alloy_metadata_unit__",
 		Value: m.Unit,
 	})
 	ts.Labels = combinedLabels
-	a.s.SendMetadata(context.Background(), ts)
-	return ref, nil
+	err := a.s.SendMetadata(a.ctx, ts)
+	return ref, err
 }

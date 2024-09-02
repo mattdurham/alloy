@@ -19,7 +19,7 @@ func BenchmarkAppender(b *testing.B) {
 	b.ReportAllocs()
 	logger := log.NewNopLogger()
 	for i := 0; i < b.N; i++ {
-		app := NewAppender(1*time.Hour, &fakeSerializer{}, 1_000, func(s types.FileQueueStats) {
+		app := NewAppender(context.Background(), 1*time.Hour, &fakeSerializer{}, 1_000, func(s types.FileQueueStats) {
 		}, logger)
 		for j := 0; j < 10_000; j++ {
 			_, _ = app.Append(0, lbls, time.Now().Unix(), 1.1)
