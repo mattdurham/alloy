@@ -122,6 +122,7 @@ func (s *serializer) store(ctx actor.Context) error {
 	defer func() {
 		types.PutTimeSeriesBinarySlice(s.series)
 		s.series = make([]*types.TimeSeriesBinary, 0)
+		s.meta = make([]*types.TimeSeriesBinary, 0)
 	}()
 
 	strMapToInt := make(map[string]uint32)
@@ -130,6 +131,10 @@ func (s *serializer) store(ctx actor.Context) error {
 	for si, ser := range s.series {
 		index = types.FillBinary(ser, strMapToInt, index)
 		group.Series[si] = ser
+	}
+	for si, ser := range s.meta {
+		index = types.FillBinary(ser, strMapToInt, index)
+		group.Metadata[si] = ser
 	}
 	stringsSlice := make([]string, len(strMapToInt))
 	for k, v := range strMapToInt {

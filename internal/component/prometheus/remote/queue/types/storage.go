@@ -70,6 +70,19 @@ func DeserializeToSeriesGroup(sg *SeriesGroup, buf []byte) (*SeriesGroup, []byte
 			}
 		}
 	}
+	for _, series := range sg.Metadata {
+		if cap(series.Labels) < len(series.LabelsNames) {
+			series.Labels = make(labels.Labels, len(series.LabelsNames))
+		} else {
+			series.Labels = series.Labels[:len(series.LabelsNames)]
+		}
+		for i := range series.LabelsNames {
+			series.Labels[i] = labels.Label{
+				Name:  sg.Strings[series.LabelsNames[i]],
+				Value: sg.Strings[series.LabelsValues[i]],
+			}
+		}
+	}
 	sg.Strings = sg.Strings[:0]
 	return sg, buffer, err
 }

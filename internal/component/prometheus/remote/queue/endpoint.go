@@ -35,7 +35,7 @@ func NewEndpoint(client types.NetworkClient, serializer types.Serializer, stats,
 		metaStats:  metatStats,
 		log:        logger,
 		ttl:        ttl,
-		incoming:   actor.NewMailbox[types.DataHandle](),
+		incoming:   actor.NewMailbox[types.DataHandle](actor.OptCapacity(1)),
 		buf:        make([]byte, 0, 1024),
 	}
 }
@@ -101,6 +101,9 @@ func (ep *endpoint) deserializeAndSend(ctx context.Context, meta map[string]stri
 	}
 	for i := 0; i < seriesCount; i++ {
 		sg.Series[i] = types.GetTimeSeriesBinary()
+	}
+	for i := 0; i < metaCount; i++ {
+		sg.Metadata[i] = types.GetTimeSeriesBinary()
 	}
 	sg, ep.buf, err = types.DeserializeToSeriesGroup(sg, ep.buf)
 

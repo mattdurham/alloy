@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/metadata"
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/stretchr/testify/require"
@@ -28,9 +30,10 @@ import (
 
 func TestE2E(t *testing.T) {
 	type e2eTest struct {
-		name   string
-		maker  func(index int, app storage.Appender) (float64, labels.Labels)
-		tester func(samples []prompb.TimeSeries)
+		name     string
+		maker    func(index int, app storage.Appender) (float64, labels.Labels)
+		tester   func(samples []prompb.TimeSeries)
+		testMeta func(samples []prompb.MetricMetadata)
 	}
 	tests := []e2eTest{
 		{
@@ -53,6 +56,25 @@ func TestE2E(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "metadata",
+			maker: func(index int, app storage.Appender) (float64, labels.Labels) {
+				meta, lbls := makeMetadata(index)
+				_, errApp := app.UpdateMetadata(0, lbls, meta)
+				require.NoError(t, errApp)
+				return 0, lbls
+			},
+			testMeta: func(samples []prompb.MetricMetadata) {
+				for _, s := range samples {
+					require.True(t, s.GetUnit() == "counter")
+					require.True(t, s.Help == "metadata help")
+					require.True(t, s.Unit == "seconds")
+					require.True(t, strings.HasPrefix(s.MetricFamilyName, "name_"))
+
+				}
+			},
+		},
+
 		{
 			name: "histogram",
 			maker: func(index int, app storage.Appender) (float64, labels.Labels) {
@@ -94,24 +116,31 @@ func TestE2E(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runTest(t, test.maker, test.tester)
+			runTest(t, test.maker, test.tester, test.testMeta)
 		})
 	}
 }
 
-const gos = 100
+const iterations = 100
 const items = 10_000
 
-func runTest(t *testing.T, add func(index int, appendable storage.Appender) (float64, labels.Labels), test func(samples []prompb.TimeSeries)) {
+func runTest(t *testing.T, add func(index int, appendable storage.Appender) (float64, labels.Labels), test func(samples []prompb.TimeSeries), metaTest func(meta []prompb.MetricMetadata)) {
 	l := util.TestAlloyLogger(t)
 	done := make(chan struct{})
 	var series atomic.Int32
+	var meta atomic.Int32
 	samples := make([]prompb.TimeSeries, 0)
+	metaSamples := make([]prompb.MetricMetadata, 0)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		newSamples := handlePost(t, w, r)
+		newSamples, newMetadata := handlePost(t, w, r)
 		series.Add(int32(len(newSamples)))
+		meta.Add(int32(len(newMetadata)))
 		samples = append(samples, newSamples...)
-		if series.Load() == gos*items {
+		metaSamples = append(metaSamples, newMetadata...)
+		if series.Load() == iterations*items {
+			done <- struct{}{}
+		}
+		if meta.Load() == iterations*items {
 			done <- struct{}{}
 		}
 	}))
@@ -131,7 +160,7 @@ func runTest(t *testing.T, add func(index int, appendable storage.Appender) (flo
 	results := make(map[float64]labels.Labels)
 	mut := sync.Mutex{}
 
-	for i := 0; i < gos; i++ {
+	for i := 0; i < iterations; i++ {
 		go func() {
 			app := exp.Receiver.Appender(ctx)
 			for j := 0; j < items; j++ {
@@ -145,7 +174,7 @@ func runTest(t *testing.T, add func(index int, appendable storage.Appender) (flo
 		}()
 
 	}
-	// This is a wierd use case to handle eventually.
+	// This is a weird use case to handle eventually.
 	tm := time.NewTimer(15 * time.Second)
 	select {
 	case <-done:
@@ -170,17 +199,15 @@ func runTest(t *testing.T, add func(index int, appendable storage.Appender) (flo
 		}
 
 	}
-	test(samples)
+	if test != nil {
+		test(samples)
+	} else {
+		metaTest(metaSamples)
+	}
 	require.True(t, types.OutStandingTimeSeriesBinary.Load() == 0)
-
 }
 
-type result struct {
-	v float64
-	l labels.Labels
-}
-
-func handlePost(t *testing.T, _ http.ResponseWriter, r *http.Request) []prompb.TimeSeries {
+func handlePost(t *testing.T, _ http.ResponseWriter, r *http.Request) ([]prompb.TimeSeries, []prompb.MetricMetadata) {
 	defer r.Body.Close()
 	data, err := io.ReadAll(r.Body)
 	require.NoError(t, err)
@@ -191,12 +218,20 @@ func handlePost(t *testing.T, _ http.ResponseWriter, r *http.Request) []prompb.T
 	var req prompb.WriteRequest
 	err = req.Unmarshal(data)
 	require.NoError(t, err)
-	return req.GetTimeseries()
+	return req.GetTimeseries(), req.Metadata
 
 }
 
 func makeSeries(index int) (int64, float64, labels.Labels) {
 	return time.Now().UTC().Unix(), float64(index), labels.FromStrings(fmt.Sprintf("name_%d", index), fmt.Sprintf("value_%d", index))
+}
+
+func makeMetadata(index int) (metadata.Metadata, labels.Labels) {
+	return metadata.Metadata{
+		Type: "counter",
+		Unit: "seconds",
+		Help: "metadata help",
+	}, labels.FromStrings("__name__", fmt.Sprintf("name_%d", index))
 }
 
 func makeHistogram(index int) (int64, labels.Labels, *histogram.Histogram) {

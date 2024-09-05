@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-kit/log"
@@ -188,7 +189,13 @@ func (l *loop) send(ctx context.Context, retryCount int) sendResult {
 	var err error
 	// Check to see if this is a retry and we can reuse the buffer.
 	if len(l.sendBuffer) == 0 {
-		data, wrErr := createWriteRequest(l.req, l.series, l.externalLabels, l.buf)
+		var data []byte
+		var wrErr error
+		if l.isMeta {
+			data, wrErr = createWriteRequestMetadata(l.req, l.series, l.buf)
+		} else {
+			data, wrErr = createWriteRequest(l.req, l.series, l.externalLabels, l.buf)
+		}
 		if wrErr != nil {
 			result.err = wrErr
 			return result
@@ -248,6 +255,7 @@ func createWriteRequest(wr *prompb.WriteRequest, series []*types.TimeSeriesBinar
 		wr.Timeseries = make([]prompb.TimeSeries, len(series))
 	}
 	wr.Timeseries = wr.Timeseries[:len(series)]
+
 	for i, tsBuf := range series {
 		ts := wr.Timeseries[i]
 		if cap(ts.Labels) < len(tsBuf.Labels) {
@@ -275,8 +283,6 @@ func createWriteRequest(wr *prompb.WriteRequest, series []*types.TimeSeriesBinar
 		if tsBuf.Histograms.Histogram == nil && tsBuf.Histograms.FloatHistogram == nil {
 			ts.Histograms = ts.Histograms[:0]
 		}
-
-		// TODO add exemplar support
 
 		// Encode the external labels inside if needed.
 		for k, v := range externalLabels {
@@ -309,6 +315,25 @@ func createWriteRequest(wr *prompb.WriteRequest, series []*types.TimeSeriesBinar
 			wr.Timeseries[i].Exemplars = wr.Timeseries[i].Exemplars[:0]
 		}
 	}()
+	data.Reset()
+	err := data.Marshal(wr)
+	return data.Bytes(), err
+}
+
+func createWriteRequestMetadata(wr *prompb.WriteRequest, series []*types.TimeSeriesBinary, data *proto.Buffer) ([]byte, error) {
+	if cap(wr.Metadata) < len(series) {
+		wr.Metadata = make([]prompb.MetricMetadata, len(series))
+	} else {
+		wr.Metadata = wr.Metadata[:len(series)]
+	}
+
+	for i, ts := range series {
+		mt, valid := toMetadata(ts)
+		if !valid {
+			continue
+		}
+		wr.Metadata[i] = mt
+	}
 	data.Reset()
 	err := data.Marshal(wr)
 	return data.Bytes(), err
@@ -393,8 +418,40 @@ func (l *loop) recordStats(statusCode int, networkError bool, r sendResult, byte
 			Histogram: types.CategoryStats{
 				Fails: getHistogramCount(l.series),
 			},
+			Metadata: types.CategoryStats{
+				Fails: getMetadataCount(l.series),
+			},
 		})
 	}
+}
+
+func getMetadataCount(tss []*types.TimeSeriesBinary) int {
+	var cnt int
+	for _, ts := range tss {
+		if isMetadata(ts) {
+			cnt++
+		}
+	}
+	return cnt
+}
+
+func isMetadata(ts *types.TimeSeriesBinary) bool {
+	return ts.Labels.Has("__alloy_metadata_type__") &&
+		ts.Labels.Has("__alloy_metadata_unit__") &&
+		ts.Labels.Has("__alloy_metadata_help__")
+}
+
+func toMetadata(ts *types.TimeSeriesBinary) (prompb.MetricMetadata, bool) {
+	if !isMetadata(ts) {
+		return prompb.MetricMetadata{}, false
+	}
+	return prompb.MetricMetadata{
+		Type:             prompb.MetricMetadata_MetricType(prompb.MetricMetadata_MetricType_value[strings.ToUpper(ts.Labels.Get("__alloy_metadata_type__"))]),
+		Help:             ts.Labels.Get("__alloy_metadata_help__"),
+		Unit:             ts.Labels.Get("__alloy_metadata_unit__"),
+		MetricFamilyName: ts.Labels.Get("__name__"),
+	}, true
+
 }
 
 func retryAfterDuration(t string) time.Duration {
@@ -413,6 +470,10 @@ func retryAfterDuration(t string) time.Duration {
 func getSeriesCount(tss []*types.TimeSeriesBinary) int {
 	cnt := 0
 	for _, ts := range tss {
+		// This is metadata
+		if isMetadata(ts) {
+			continue
+		}
 		if ts.Histograms.Histogram == nil && ts.Histograms.FloatHistogram == nil {
 			cnt++
 		}
@@ -423,6 +484,9 @@ func getSeriesCount(tss []*types.TimeSeriesBinary) int {
 func getHistogramCount(tss []*types.TimeSeriesBinary) int {
 	cnt := 0
 	for _, ts := range tss {
+		if isMetadata(ts) {
+			continue
+		}
 		if ts.Histograms.Histogram != nil || ts.Histograms.FloatHistogram != nil {
 			cnt++
 		}

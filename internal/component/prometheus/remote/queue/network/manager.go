@@ -99,7 +99,7 @@ func (s *manager) DoWork(ctx actor.Context) actor.WorkerStatus {
 		if !ok {
 			return actor.WorkerEnd
 		}
-		s.Queue(ctx, ts)
+		s.queue(ctx, ts)
 		return actor.WorkerContinue
 	case ts, ok := <-s.metaInbox.ReceiveC():
 		if !ok {
@@ -147,7 +147,7 @@ func (s *manager) Stop() {
 }
 
 // Queue adds anything thats not metadata to the queue.
-func (s *manager) Queue(ctx context.Context, ts *types.TimeSeriesBinary) {
+func (s *manager) queue(ctx context.Context, ts *types.TimeSeriesBinary) {
 	// Based on a hash which is the label hash add to the queue.
 	queueNum := ts.Hash % s.connectionCount
 	_ = s.loops[queueNum].seriesMbx.Send(ctx, ts)
