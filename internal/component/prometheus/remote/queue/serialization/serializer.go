@@ -8,6 +8,7 @@ import (
 	snappy "github.com/eapache/go-xerial-snappy"
 	"github.com/go-kit/log"
 	"github.com/grafana/alloy/internal/component/prometheus/remote/queue/types"
+	"github.com/grafana/alloy/internal/runtime/logging/level"
 	"github.com/vladopajic/go-actor/actor"
 )
 
@@ -22,10 +23,11 @@ type serializer struct {
 	lastFlush           time.Time
 	logger              log.Logger
 	self                actor.Actor
-	flushTestTimer      *time.Ticker
-	series              []*types.TimeSeriesBinary
-	meta                []*types.TimeSeriesBinary
-	msgpBuffer          []byte
+	// Every 1 second we should check if need to flush.
+	flushTestTimer *time.Ticker
+	series         []*types.TimeSeriesBinary
+	meta           []*types.TimeSeriesBinary
+	msgpBuffer     []byte
 }
 
 func NewSerializer(maxItemsBeforeFlush int, flushDuration time.Duration, q types.FileStorage, l log.Logger) (types.Serializer, error) {
@@ -45,6 +47,7 @@ func NewSerializer(maxItemsBeforeFlush int, flushDuration time.Duration, q types
 	return s, nil
 }
 func (s *serializer) Start() {
+	// All the actors and mailboxes need to start.
 	s.queue.Start()
 	s.self = actor.Combine(actor.New(s), s.inbox, s.metaInbox).Build()
 	s.self.Start()
@@ -63,6 +66,7 @@ func (s *serializer) SendMetadata(ctx context.Context, data *types.TimeSeriesBin
 	return s.metaInbox.Send(ctx, data)
 }
 func (s *serializer) DoWork(ctx actor.Context) actor.WorkerStatus {
+	// TODO @mattdurham add the ability to update the configuration.
 	select {
 	case <-ctx.Done():
 		return actor.WorkerEnd
@@ -70,17 +74,26 @@ func (s *serializer) DoWork(ctx actor.Context) actor.WorkerStatus {
 		if !ok {
 			return actor.WorkerEnd
 		}
-		s.Append(ctx, item)
+		err := s.Append(ctx, item)
+		if err != nil {
+			level.Error(s.logger).Log("msg", "unable to append to serializer", "err", err)
+		}
 		return actor.WorkerContinue
 	case item, ok := <-s.metaInbox.ReceiveC():
 		if !ok {
 			return actor.WorkerEnd
 		}
-		s.AppendMetadata(ctx, item)
+		err := s.AppendMetadata(ctx, item)
+		if err != nil {
+			level.Error(s.logger).Log("msg", "unable to append metadata to serializer", "err", err)
+		}
 		return actor.WorkerContinue
 	case <-s.flushTestTimer.C:
 		if time.Since(s.lastFlush) > s.flushDuration {
-			s.store(ctx)
+			err := s.store(ctx)
+			if err != nil {
+				level.Error(s.logger).Log("msg", "unable to store data", "err", err)
+			}
 		}
 		return actor.WorkerContinue
 	}
@@ -111,7 +124,10 @@ func (s *serializer) Append(ctx actor.Context, data *types.TimeSeriesBinary) err
 }
 
 func (s *serializer) store(ctx actor.Context) error {
-	s.lastFlush = time.Now()
+	defer func() {
+		s.lastFlush = time.Now()
+	}()
+	// Do nothing if there is nothing.
 	if len(s.series) == 0 && len(s.meta) == 0 {
 		return nil
 	}
@@ -125,20 +141,20 @@ func (s *serializer) store(ctx actor.Context) error {
 		s.meta = make([]*types.TimeSeriesBinary, 0)
 	}()
 
+	// This maps strings to index position in a slice. This is doing to reduce the file size of the data.
 	strMapToInt := make(map[string]uint32)
-	index := uint32(0)
+	for i, ts := range s.series {
+		ts.FillLabelMapping(strMapToInt)
+		group.Series[i] = ts
+	}
+	for i, ts := range s.meta {
+		ts.FillLabelMapping(strMapToInt)
+		group.Metadata[i] = ts
+	}
 
-	for si, ser := range s.series {
-		index = types.FillBinary(ser, strMapToInt, index)
-		group.Series[si] = ser
-	}
-	for si, ser := range s.meta {
-		index = types.FillBinary(ser, strMapToInt, index)
-		group.Metadata[si] = ser
-	}
 	stringsSlice := make([]string, len(strMapToInt))
-	for k, v := range strMapToInt {
-		stringsSlice[v] = k
+	for stringValue, index := range strMapToInt {
+		stringsSlice[index] = stringValue
 	}
 	group.Strings = stringsSlice
 
@@ -151,7 +167,7 @@ func (s *serializer) store(ctx actor.Context) error {
 	meta := map[string]string{
 		// product.signal_type.schema.version
 		"version":       "alloy.metrics.queue.v1",
-		"encoding":      "snappy",
+		"compression":   "snappy",
 		"series_count":  strconv.Itoa(len(group.Series)),
 		"meta_count":    strconv.Itoa(len(group.Metadata)),
 		"strings_count": strconv.Itoa(len(group.Strings)),

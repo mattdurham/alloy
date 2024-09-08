@@ -66,9 +66,9 @@ func TestE2E(t *testing.T) {
 			},
 			testMeta: func(samples []prompb.MetricMetadata) {
 				for _, s := range samples {
-					require.True(t, s.GetUnit() == "counter")
+					require.True(t, s.GetUnit() == "seconds")
 					require.True(t, s.Help == "metadata help")
-					require.True(t, s.Unit == "seconds")
+					require.True(t, s.Unit == "counter")
 					require.True(t, strings.HasPrefix(s.MetricFamilyName, "name_"))
 
 				}

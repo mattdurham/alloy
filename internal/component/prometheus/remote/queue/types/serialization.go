@@ -82,6 +82,7 @@ type BucketSpan struct {
 	Length uint32
 }
 
+// For consistency its easier to convert metadata into TimeSeriesBinary.
 func (ts TimeSeriesBinary) IsMetadata() bool {
 	return ts.Labels.Has("__alloy_metadata_type__")
 }
@@ -171,35 +172,34 @@ func FromPromSpan(spans []histogram.Span) []BucketSpan {
 	return bs
 }
 
-// FillBinary is what does the conversion from labels.Labels to LabelNames and
+// FillLabelMapping is what does the conversion from labels.Labels to LabelNames and
 // LabelValues while filling in the string map, that is later converted to []string.
-func FillBinary(ts *TimeSeriesBinary, strMapToInt map[string]uint32, index uint32) uint32 {
-	ts.LabelsNames = alignArray(ts.LabelsNames, len(ts.Labels))
-	ts.LabelsValues = alignArray(ts.LabelsValues, len(ts.Labels))
+func (ts *TimeSeriesBinary) FillLabelMapping(strMapToInt map[string]uint32) {
+	ts.LabelsNames = setSliceLength(ts.LabelsNames, len(ts.Labels))
+	ts.LabelsValues = setSliceLength(ts.LabelsValues, len(ts.Labels))
 
-	// This is where we deduplicate the ts.Labels into int32 values.
+	// This is where we deduplicate the ts.Labels into uint32 values
+	// that map to a string in the strings slice via the index.
 	for i, v := range ts.Labels {
 		val, found := strMapToInt[v.Name]
 		if !found {
-			strMapToInt[v.Name] = index
-			val = index
-			index++
+			val = uint32(len(strMapToInt))
+			strMapToInt[v.Name] = val
 		}
 		ts.LabelsNames[i] = val
 
 		val, found = strMapToInt[v.Value]
 		if !found {
-			strMapToInt[v.Value] = index
-			val = index
-			index++
+			val = uint32(len(strMapToInt))
+			strMapToInt[v.Value] = val
 		}
 		ts.LabelsValues[i] = val
 	}
-	return index
+
 }
 
-func alignArray(lbls []uint32, length int) []uint32 {
-	if cap(lbls) < length {
+func setSliceLength(lbls []uint32, length int) []uint32 {
+	if cap(lbls) <= length {
 		lbls = make([]uint32, length)
 	} else {
 		lbls = lbls[:length]

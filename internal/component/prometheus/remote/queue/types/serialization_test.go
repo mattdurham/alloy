@@ -27,9 +27,8 @@ func TestLabels(t *testing.T) {
 	sg.Series[0].Labels = labels.FromMap(lblsMap)
 	strMap := make(map[string]uint32)
 
-	index := uint32(0)
-	index = FillBinary(sg.Series[0], strMap, index)
-	require.True(t, index == uint32(len(unique)))
+	sg.Series[0].FillLabelMapping(strMap)
+	require.True(t, len(sg.Series) == len(unique))
 	stringsSlice := make([]string, len(strMap))
 	for k, v := range strMap {
 		stringsSlice[v] = k

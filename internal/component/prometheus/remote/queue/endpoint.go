@@ -64,7 +64,8 @@ func (ep *endpoint) DoWork(ctx actor.Context) actor.WorkerStatus {
 		}
 		meta, buf, err := file.Get()
 		if err != nil {
-			return actor.WorkerEnd
+			level.Error(ep.log).Log("msg", "unable to get file contents", "name", file.Name, "err", err)
+			return actor.WorkerContinue
 		}
 		ep.deserializeAndSend(ctx, meta, buf)
 		return actor.WorkerContinue

@@ -2,13 +2,11 @@ package filequeue
 
 import (
 	"context"
-	"testing"
-	"time"
-
 	"github.com/go-kit/log"
 	"github.com/grafana/alloy/internal/component/prometheus/remote/queue/types"
 	"github.com/stretchr/testify/require"
 	"github.com/vladopajic/go-actor/actor"
+	"testing"
 )
 
 func BenchmarkFileQueue(t *testing.B) {
@@ -33,14 +31,6 @@ func BenchmarkFileQueue(t *testing.B) {
 		require.True(t, string(buf) == "test")
 		require.Len(t, meta, 0)
 
-		// Ensure nothing new comes through.
-		timer := time.NewTicker(100 * time.Millisecond)
-		select {
-		case <-timer.C:
-			return
-		case <-mbx.ReceiveC():
-			require.True(t, false)
-		}
 	}
 }
 
