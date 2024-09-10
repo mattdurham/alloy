@@ -61,7 +61,10 @@ func BenchmarkSimple(b *testing.B) {
 				runtime.ReadMemStats(&m1)
 				q := &fq{}
 				l := log2.NewNopLogger()
-				wr, err := NewSerializer(16*1024*1024, 500*time.Millisecond, q, l)
+				wr, err := NewSerializer(types.SerializerConfig{
+					MaxSignalsInBatch: 100_000,
+					FlushFrequency:    500 * time.Millisecond,
+				}, q, l)
 				wr.Start()
 				b.Cleanup(func() {
 					wr.Stop()

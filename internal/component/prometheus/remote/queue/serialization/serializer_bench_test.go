@@ -15,7 +15,7 @@ import (
 var lbls = labels.FromStrings("one", "two", "three", "four")
 
 func BenchmarkAppender(b *testing.B) {
-	// This should be around 100 allocs
+	// This should be 0 allocs 1220000 ns/op
 	b.ReportAllocs()
 	logger := log.NewNopLogger()
 	for i := 0; i < b.N; i++ {
@@ -29,18 +29,19 @@ func BenchmarkAppender(b *testing.B) {
 }
 
 func BenchmarkSerializer(b *testing.B) {
-	// This should be around 1k allocs
+	// This should be around 250-300 allocs and 5500000 ns/op
 	series := getTimeSeries(b)
 	b.ResetTimer()
 	b.ReportAllocs()
 	logger := log.NewNopLogger()
 	for i := 0; i < b.N; i++ {
-		serial, _ := NewSerializer(10_000, 5*time.Second, &fakeFileQueue{}, logger)
+		serial, _ := NewSerializer(types.SerializerConfig{
+			MaxSignalsInBatch: 1_000,
+			FlushFrequency:    1 * time.Second,
+		}, &fakeFileQueue{}, logger)
 		serial.Start()
-		for j := 0; j < 100_000; j++ {
-			for _, s := range series {
-				_ = serial.SendSeries(context.Background(), s)
-			}
+		for _, s := range series {
+			_ = serial.SendSeries(context.Background(), s)
 		}
 		serial.Stop()
 	}
@@ -49,7 +50,7 @@ func BenchmarkSerializer(b *testing.B) {
 func getTimeSeries(b *testing.B) []*types.TimeSeriesBinary {
 	b.Helper()
 	series := make([]*types.TimeSeriesBinary, 0)
-	for j := 0; j < 1_000; j++ {
+	for j := 0; j < 10_000; j++ {
 		timeseries := types.GetTimeSeriesBinary()
 		timeseries.TS = time.Now().Unix()
 		timeseries.Value = rand.Float64()
@@ -85,6 +86,7 @@ func (f *fakeSerializer) SendSeries(ctx context.Context, data *types.TimeSeriesB
 }
 
 func (f *fakeSerializer) SendMetadata(ctx context.Context, data *types.TimeSeriesBinary) error {
+	types.PutTimeSeriesBinary(data)
 	return nil
 }
 

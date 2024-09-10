@@ -17,8 +17,9 @@ import (
 type serializer struct {
 	inbox               actor.Mailbox[*types.TimeSeriesBinary]
 	metaInbox           actor.Mailbox[*types.TimeSeriesBinary]
+	cfgInbox            actor.Mailbox[types.SerializerConfig]
 	maxItemsBeforeFlush int
-	flushDuration       time.Duration
+	flushFrequency      time.Duration
 	queue               types.FileStorage
 	lastFlush           time.Time
 	logger              log.Logger
@@ -30,15 +31,16 @@ type serializer struct {
 	msgpBuffer     []byte
 }
 
-func NewSerializer(maxItemsBeforeFlush int, flushDuration time.Duration, q types.FileStorage, l log.Logger) (types.Serializer, error) {
+func NewSerializer(cfg types.SerializerConfig, q types.FileStorage, l log.Logger) (types.Serializer, error) {
 	s := &serializer{
-		maxItemsBeforeFlush: maxItemsBeforeFlush,
-		flushDuration:       flushDuration,
+		maxItemsBeforeFlush: int(cfg.MaxSignalsInBatch),
+		flushFrequency:      cfg.FlushFrequency,
 		queue:               q,
 		series:              make([]*types.TimeSeriesBinary, 0),
 		logger:              l,
 		inbox:               actor.NewMailbox[*types.TimeSeriesBinary](),
 		metaInbox:           actor.NewMailbox[*types.TimeSeriesBinary](),
+		cfgInbox:            actor.NewMailbox[types.SerializerConfig](),
 		flushTestTimer:      time.NewTicker(1 * time.Second),
 		msgpBuffer:          make([]byte, 0),
 		lastFlush:           time.Now(),
@@ -49,7 +51,7 @@ func NewSerializer(maxItemsBeforeFlush int, flushDuration time.Duration, q types
 func (s *serializer) Start() {
 	// All the actors and mailboxes need to start.
 	s.queue.Start()
-	s.self = actor.Combine(actor.New(s), s.inbox, s.metaInbox).Build()
+	s.self = actor.Combine(actor.New(s), s.inbox, s.metaInbox, s.cfgInbox).Build()
 	s.self.Start()
 }
 
@@ -66,7 +68,20 @@ func (s *serializer) SendMetadata(ctx context.Context, data *types.TimeSeriesBin
 	return s.metaInbox.Send(ctx, data)
 }
 func (s *serializer) DoWork(ctx actor.Context) actor.WorkerStatus {
-	// TODO @mattdurham add the ability to update the configuration.
+	// Check for config has priority.
+	select {
+	case <-ctx.Done():
+		return actor.WorkerEnd
+	case cfg, ok := <-s.cfgInbox.ReceiveC():
+		if !ok {
+			return actor.WorkerEnd
+		}
+		s.maxItemsBeforeFlush = int(cfg.MaxSignalsInBatch)
+		s.flushFrequency = cfg.FlushFrequency
+		return actor.WorkerContinue
+	default:
+	}
+
 	select {
 	case <-ctx.Done():
 		return actor.WorkerEnd
@@ -89,7 +104,7 @@ func (s *serializer) DoWork(ctx actor.Context) actor.WorkerStatus {
 		}
 		return actor.WorkerContinue
 	case <-s.flushTestTimer.C:
-		if time.Since(s.lastFlush) > s.flushDuration {
+		if time.Since(s.lastFlush) > s.flushFrequency {
 			err := s.store(ctx)
 			if err != nil {
 				level.Error(s.logger).Log("msg", "unable to store data", "err", err)
@@ -100,12 +115,11 @@ func (s *serializer) DoWork(ctx actor.Context) actor.WorkerStatus {
 }
 
 func (s *serializer) AppendMetadata(ctx actor.Context, data *types.TimeSeriesBinary) error {
-
 	s.meta = append(s.meta, data)
 	// If we would go over the max size then send, or if we have hit the flush duration then send.
-	if len(s.meta) >= s.maxItemsBeforeFlush {
+	if len(s.meta)+len(s.series) >= s.maxItemsBeforeFlush {
 		return s.store(ctx)
-	} else if time.Since(s.lastFlush) > s.flushDuration {
+	} else if time.Since(s.lastFlush) > s.flushFrequency {
 		return s.store(ctx)
 	}
 	return nil
@@ -115,9 +129,9 @@ func (s *serializer) Append(ctx actor.Context, data *types.TimeSeriesBinary) err
 
 	s.series = append(s.series, data)
 	// If we would go over the max size then send, or if we have hit the flush duration then send.
-	if len(s.series) >= s.maxItemsBeforeFlush {
+	if len(s.meta)+len(s.series) >= s.maxItemsBeforeFlush {
 		return s.store(ctx)
-	} else if time.Since(s.lastFlush) > s.flushDuration {
+	} else if time.Since(s.lastFlush) > s.flushFrequency {
 		return s.store(ctx)
 	}
 	return nil
@@ -137,6 +151,7 @@ func (s *serializer) store(ctx actor.Context) error {
 	}
 	defer func() {
 		types.PutTimeSeriesBinarySlice(s.series)
+		types.PutTimeSeriesBinarySlice(s.meta)
 		s.series = make([]*types.TimeSeriesBinary, 0)
 		s.meta = make([]*types.TimeSeriesBinary, 0)
 	}()

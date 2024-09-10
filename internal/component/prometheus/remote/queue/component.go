@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sync"
+	"time"
 
 	"github.com/grafana/alloy/internal/component/prometheus/remote/queue/filequeue"
 	"github.com/grafana/alloy/internal/component/prometheus/remote/queue/network"
@@ -132,7 +133,10 @@ func (s *Queue) createEndpoints() error {
 		if err != nil {
 			return err
 		}
-		serial, err := serialization.NewSerializer(s.args.MaxFlushSize, s.args.FlushDuration, fq, s.opts.Logger)
+		serial, err := serialization.NewSerializer(types.SerializerConfig{
+			MaxSignalsInBatch: 10_000,
+			FlushFrequency:    1 * time.Second,
+		}, fq, s.opts.Logger)
 		if err != nil {
 			return err
 		}

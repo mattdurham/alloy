@@ -18,7 +18,7 @@ type SeriesGroup struct {
 }
 
 type TimeSeriesBinary struct {
-	// Labels are not serialized but are passed in.
+	// Labels are not serialized to msgp but are passed in.
 	Labels       labels.Labels `msg:"-"`
 	LabelsNames  []uint32
 	LabelsValues []uint32
@@ -82,7 +82,7 @@ type BucketSpan struct {
 	Length uint32
 }
 
-// For consistency its easier to convert metadata into TimeSeriesBinary.
+// IsMetadata is used because it's easier to store metadata as a set of labels.
 func (ts TimeSeriesBinary) IsMetadata() bool {
 	return ts.Labels.Has("__alloy_metadata_type__")
 }
