@@ -24,14 +24,14 @@ import (
 var _ actor.Worker = (*loop)(nil)
 
 // loop handles the low level sending of data. It conceptually a queue.
-// TODO @mattdurham think about if we need to split loop into metadata loop
+// loop makes no attempt to save or restore signals in the queue.
+// loop config cannot be updated, it is easier to recreate. This does mean we lose any signals in the queue.
 type loop struct {
 	isMeta         bool
-	configMbx      actor.Mailbox[ConnectionConfig]
 	seriesMbx      actor.Mailbox[*types.TimeSeriesBinary]
 	client         *http.Client
 	batchCount     int
-	flushTimer     time.Duration
+	flushFrequency time.Duration
 	cfg            ConnectionConfig
 	log            log.Logger
 	lastSend       time.Time
@@ -46,17 +46,17 @@ type loop struct {
 	sendBuffer     []byte
 }
 
-func newLoop(cc ConnectionConfig, isMetaData bool, log log.Logger, series func(s types.NetworkStats)) *loop {
+func newLoop(cc ConnectionConfig, isMetaData bool, log log.Logger, stats func(s types.NetworkStats)) *loop {
 	l := &loop{
-		isMeta:         isMetaData,
+		isMeta: isMetaData,
+		// In general we want a healthy queue of items, in this case we want to have 2x our maximum send sized ready.
 		seriesMbx:      actor.NewMailbox[*types.TimeSeriesBinary](actor.OptCapacity(2 * cc.BatchCount)),
-		configMbx:      actor.NewMailbox[ConnectionConfig](),
 		batchCount:     cc.BatchCount,
-		flushTimer:     cc.FlushDuration,
+		flushFrequency: cc.FlushFrequency,
 		client:         &http.Client{},
 		cfg:            cc,
 		log:            log,
-		statsFunc:      series,
+		statsFunc:      stats,
 		externalLabels: cc.ExternalLabels,
 		ticker:         time.NewTicker(1 * time.Second),
 		buf:            proto.NewBuffer(nil),
@@ -84,41 +84,21 @@ func (l *loop) actors() []actor.Actor {
 	return []actor.Actor{
 		actor.New(l),
 		l.seriesMbx,
-		l.configMbx,
 	}
 }
 
 func (l *loop) DoWork(ctx actor.Context) actor.WorkerStatus {
-	// This first select is to prioritize configuration changes.
-	select {
-	case <-ctx.Done():
-		l.stopCalled.Store(true)
-		return actor.WorkerEnd
-	case cc, ok := <-l.configMbx.ReceiveC():
-		if !ok {
-			return actor.WorkerEnd
-		}
-		l.cfg = cc
-		return actor.WorkerContinue
-	default:
-	}
 	// Main select loop
 	select {
 	case <-ctx.Done():
 		l.stopCalled.Store(true)
 		return actor.WorkerEnd
-	case cc, ok := <-l.configMbx.ReceiveC():
-		if !ok {
-			return actor.WorkerEnd
-		}
-		l.cfg = cc
-		return actor.WorkerContinue
 	// Ticker is to ensure the flush timer is called.
 	case <-l.ticker.C:
 		if len(l.series) == 0 {
 			return actor.WorkerContinue
 		}
-		if time.Since(l.lastSend) > l.flushTimer {
+		if time.Since(l.lastSend) > l.flushFrequency {
 			l.trySend(ctx)
 		}
 		return actor.WorkerContinue
@@ -162,6 +142,8 @@ attempt:
 	if l.stopCalled.Load() {
 		return
 	}
+	// Sleep between attempts.
+	time.Sleep(result.retryAfter)
 	goto attempt
 }
 
@@ -170,6 +152,8 @@ type sendResult struct {
 	successful       bool
 	recoverableError bool
 	retryAfter       time.Duration
+	statusCode       int
+	networkError     bool
 }
 
 func (l *loop) finishSending() {
@@ -179,12 +163,11 @@ func (l *loop) finishSending() {
 	l.lastSend = time.Now()
 }
 
+// send is the main work loop of the loop.
 func (l *loop) send(ctx context.Context, retryCount int) sendResult {
 	result := sendResult{}
-	var networkError bool
-	var statusCode int
 	defer func() {
-		l.recordStats(statusCode, networkError, result, len(l.sendBuffer))
+		recordStats(l.series, l.isMeta, l.statsFunc, result, len(l.sendBuffer))
 	}()
 	var err error
 	// Check to see if this is a retry and we can reuse the buffer.
@@ -198,6 +181,7 @@ func (l *loop) send(ctx context.Context, retryCount int) sendResult {
 		}
 		if wrErr != nil {
 			result.err = wrErr
+			result.recoverableError = false
 			return result
 		}
 		l.sendBuffer = snappy.Encode(l.sendBuffer, data)
@@ -206,6 +190,8 @@ func (l *loop) send(ctx context.Context, retryCount int) sendResult {
 	httpReq, err := http.NewRequest("POST", l.cfg.URL, bytes.NewReader(l.sendBuffer))
 	if err != nil {
 		result.err = err
+		result.recoverableError = true
+		result.networkError = true
 		return result
 	}
 	httpReq.Header.Add("Content-Encoding", "snappy")
@@ -222,16 +208,17 @@ func (l *loop) send(ctx context.Context, retryCount int) sendResult {
 	resp, err := l.client.Do(httpReq.WithContext(ctx))
 	// Network errors are recoverable.
 	if err != nil {
-		networkError = true
 		result.err = err
+		result.networkError = true
 		result.recoverableError = true
+		result.retryAfter = l.cfg.RetryBackoff
 		return result
 	}
-	statusCode = resp.StatusCode
+	result.statusCode = resp.StatusCode
 	defer resp.Body.Close()
 	// 500 errors are considered recoverable.
 	if resp.StatusCode/100 == 5 || resp.StatusCode == http.StatusTooManyRequests {
-		result.retryAfter = retryAfterDuration(resp.Header.Get("Retry-After"))
+		result.retryAfter = retryAfterDuration(l.cfg.RetryBackoff, resp.Header.Get("Retry-After"))
 		result.recoverableError = true
 		return result
 	}
@@ -266,6 +253,8 @@ func createWriteRequest(wr *prompb.WriteRequest, series []*types.TimeSeriesBinar
 			ts.Labels[k].Name = v.Name
 			ts.Labels[k].Value = v.Value
 		}
+
+		// By default each sample only has a histogram, float histogram or sample.
 		if cap(ts.Histograms) == 0 {
 			ts.Histograms = make([]prompb.Histogram, 1)
 		} else {
@@ -301,6 +290,7 @@ func createWriteRequest(wr *prompb.WriteRequest, series []*types.TimeSeriesBinar
 				})
 			}
 		}
+		// By default each TimeSeries only has one sample.
 		if len(ts.Samples) == 0 {
 			ts.Samples = make([]prompb.Sample, 1)
 		}
@@ -315,6 +305,7 @@ func createWriteRequest(wr *prompb.WriteRequest, series []*types.TimeSeriesBinar
 			wr.Timeseries[i].Exemplars = wr.Timeseries[i].Exemplars[:0]
 		}
 	}()
+	// Reset the buffer for reuse.
 	data.Reset()
 	err := data.Marshal(wr)
 	return data.Bytes(), err
@@ -337,92 +328,6 @@ func createWriteRequestMetadata(wr *prompb.WriteRequest, series []*types.TimeSer
 	data.Reset()
 	err := data.Marshal(wr)
 	return data.Bytes(), err
-}
-
-// recordStats determines what values to send to the stats function. This allows for any
-// number of metrics/signals libraries to be used. Prometheus, OTel, and any other.
-func (l *loop) recordStats(statusCode int, networkError bool, r sendResult, bytesSent int) {
-	// If its a network error send a fail.
-	if networkError {
-		l.statsFunc(types.NetworkStats{
-			Series: types.CategoryStats{
-				Fails: getSeriesCount(l.series),
-			},
-			Histogram: types.CategoryStats{
-				Fails: getHistogramCount(l.series),
-			},
-		})
-		return
-
-	}
-	if r.successful {
-		// Need to grab the newest series.
-		var newestTS int64
-		for _, ts := range l.series {
-			if ts.TS > newestTS {
-				newestTS = ts.TS
-			}
-		}
-		var sampleBytesSent int
-		var metaBytesSent int
-		// Each loop is explicitly a normal signal or metadata sender.
-		if l.isMeta {
-			metaBytesSent = bytesSent
-		} else {
-			sampleBytesSent = bytesSent
-		}
-		l.statsFunc(types.NetworkStats{
-			Series: types.CategoryStats{
-				SeriesSent: getSeriesCount(l.series),
-			},
-			Histogram: types.CategoryStats{
-				SeriesSent: getHistogramCount(l.series),
-			},
-			MetadataBytes:   metaBytesSent,
-			SeriesBytes:     sampleBytesSent,
-			NewestTimestamp: newestTS,
-		})
-		return
-	}
-
-	if statusCode == http.StatusTooManyRequests {
-		l.statsFunc(types.NetworkStats{
-			Series: types.CategoryStats{
-				Retries:    getSeriesCount(l.series),
-				Retries429: getSeriesCount(l.series),
-			},
-			Histogram: types.CategoryStats{
-				Retries:    getHistogramCount(l.series),
-				Retries429: getHistogramCount(l.series),
-			},
-		})
-		return
-	}
-	if statusCode/100 == 5 {
-		l.statsFunc(types.NetworkStats{
-			Series: types.CategoryStats{
-				Retries5XX: getSeriesCount(l.series),
-			},
-			Histogram: types.CategoryStats{
-				Retries5XX: getHistogramCount(l.series),
-			},
-		})
-		return
-	}
-
-	if statusCode != 200 {
-		l.statsFunc(types.NetworkStats{
-			Series: types.CategoryStats{
-				Fails: getSeriesCount(l.series),
-			},
-			Histogram: types.CategoryStats{
-				Fails: getHistogramCount(l.series),
-			},
-			Metadata: types.CategoryStats{
-				Fails: getMetadataCount(l.series),
-			},
-		})
-	}
 }
 
 func getMetadataCount(tss []*types.TimeSeriesBinary) int {
@@ -451,45 +356,17 @@ func toMetadata(ts *types.TimeSeriesBinary) (prompb.MetricMetadata, bool) {
 		Unit:             ts.Labels.Get("__alloy_metadata_unit__"),
 		MetricFamilyName: ts.Labels.Get("__name__"),
 	}, true
-
 }
 
-func retryAfterDuration(t string) time.Duration {
-	parsedDuration, err := time.Parse(http.TimeFormat, t)
+func retryAfterDuration(defaultDuration time.Duration, t string) time.Duration {
+	parsedTime, err := time.Parse(http.TimeFormat, t)
 	if err == nil {
-		return parsedDuration.Sub(time.Now().UTC())
+		return time.Until(parsedTime)
 	}
 	// The duration can be in seconds.
 	d, err := strconv.Atoi(t)
 	if err != nil {
-		return 5
+		return defaultDuration
 	}
 	return time.Duration(d) * time.Second
-}
-
-func getSeriesCount(tss []*types.TimeSeriesBinary) int {
-	cnt := 0
-	for _, ts := range tss {
-		// This is metadata
-		if isMetadata(ts) {
-			continue
-		}
-		if ts.Histograms.Histogram == nil && ts.Histograms.FloatHistogram == nil {
-			cnt++
-		}
-	}
-	return cnt
-}
-
-func getHistogramCount(tss []*types.TimeSeriesBinary) int {
-	cnt := 0
-	for _, ts := range tss {
-		if isMetadata(ts) {
-			continue
-		}
-		if ts.Histograms.Histogram != nil || ts.Histograms.FloatHistogram != nil {
-			cnt++
-		}
-	}
-	return cnt
 }

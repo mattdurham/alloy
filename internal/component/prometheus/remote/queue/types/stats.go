@@ -211,13 +211,13 @@ func (s *PrometheusStats) UpdateNetwork(stats NetworkStats) {
 	s.MetadataTotal.Add(float64(stats.Metadata.SeriesSent))
 	s.HistogramsTotal.Add(float64(stats.Histogram.SeriesSent))
 
-	s.FailedSamplesTotal.Add(float64(stats.Series.Fails))
-	s.FailedMetadataTotal.Add(float64(stats.Metadata.Fails))
-	s.FailedHistogramsTotal.Add(float64(stats.Histogram.Fails))
+	s.FailedSamplesTotal.Add(float64(stats.Series.FailedSamples))
+	s.FailedMetadataTotal.Add(float64(stats.Metadata.FailedSamples))
+	s.FailedHistogramsTotal.Add(float64(stats.Histogram.FailedSamples))
 
-	s.RetriedSamplesTotal.Add(float64(stats.Series.Retries))
-	s.RetriedHistogramsTotal.Add(float64(stats.Histogram.Retries))
-	s.RetriedMetadataTotal.Add(float64(stats.Metadata.Retries))
+	s.RetriedSamplesTotal.Add(float64(stats.Series.RetriedSamples))
+	s.RetriedHistogramsTotal.Add(float64(stats.Histogram.RetriedSamples))
+	s.RetriedMetadataTotal.Add(float64(stats.Metadata.RetriedSamples))
 
 	s.MetadataBytesTotal.Add(float64(stats.MetadataBytes))
 	s.SentBytesTotal.Add(float64(stats.SeriesBytes))
@@ -247,27 +247,28 @@ func (ns NetworkStats) TotalSent() int {
 }
 
 func (ns NetworkStats) TotalRetried() int {
-	return ns.Series.Retries + ns.Histogram.Retries + ns.Metadata.Retries
+	return ns.Series.RetriedSamples + ns.Histogram.RetriedSamples + ns.Metadata.RetriedSamples
 }
 
 func (ns NetworkStats) TotalFailed() int {
-	return ns.Series.Fails + ns.Histogram.Fails + ns.Metadata.Fails
+	return ns.Series.FailedSamples + ns.Histogram.FailedSamples + ns.Metadata.FailedSamples
 }
 
 func (ns NetworkStats) Total429() int {
-	return ns.Series.Retries429 + ns.Histogram.Retries429 + ns.Metadata.Retries429
+	return ns.Series.RetriedSamples429 + ns.Histogram.RetriedSamples429 + ns.Metadata.RetriedSamples429
 }
 
 func (ns NetworkStats) Total5XX() int {
-	return ns.Series.Retries5XX + ns.Histogram.Retries5XX + ns.Metadata.Retries5XX
+	return ns.Series.RetriedSamples5XX + ns.Histogram.RetriedSamples5XX + ns.Metadata.RetriedSamples5XX
 }
 
 type CategoryStats struct {
-	Retries    int
-	Retries429 int
-	Retries5XX int
-	SeriesSent int
-	Fails      int
+	RetriedSamples       int
+	RetriedSamples429    int
+	RetriedSamples5XX    int
+	SeriesSent           int
+	FailedSamples        int
+	NetworkSamplesFailed int
 }
 
 type FileQueueStats struct {

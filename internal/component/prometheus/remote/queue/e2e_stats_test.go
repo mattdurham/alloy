@@ -42,6 +42,7 @@ const alloyFailures = "alloy_queue_series_network_failures"
 const alloyRetries = "alloy_queue_series_network_retries"
 const alloy429 = "alloy_queue_series_network_retries_429"
 
+// TestMetrics is the large end to end testing for the queue based wal.
 func TestMetrics(t *testing.T) {
 	// Check assumes you are checking for any value that is not 0.
 	// The test at the end will see if there are any values that were not 0.

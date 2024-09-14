@@ -10,6 +10,7 @@ import (
 	"github.com/vladopajic/go-actor/actor"
 )
 
+// manager manages loops. Mostly it exists to control their lifecycle and send work to them.
 type manager struct {
 	connectionCount uint64
 	loops           []*loop
@@ -105,7 +106,10 @@ func (s *manager) DoWork(ctx actor.Context) actor.WorkerStatus {
 		if !ok {
 			return actor.WorkerEnd
 		}
-		_ = s.metadata.seriesMbx.Send(ctx, ts)
+		err := s.metadata.seriesMbx.Send(ctx, ts)
+		if err != nil {
+			level.Error(s.logger).Log("msg", "failed to send to metadata loop", "err", err)
+		}
 		return actor.WorkerContinue
 	}
 }
@@ -117,7 +121,7 @@ func (s *manager) updateConfig(cc ConnectionConfig) {
 	}
 	// TODO @mattdurham make this smarter, at the moment any samples in the loops are lost.
 	// Ideally we would drain the queues and re add them but that is a future need.
-
+	// In practice this shouldn't change often so data loss should be minimal.
 	// For the moment we will stop all the items and recreate them.
 	for _, l := range s.loops {
 		l.Stop()
@@ -150,5 +154,9 @@ func (s *manager) Stop() {
 func (s *manager) queue(ctx context.Context, ts *types.TimeSeriesBinary) {
 	// Based on a hash which is the label hash add to the queue.
 	queueNum := ts.Hash % s.connectionCount
-	_ = s.loops[queueNum].seriesMbx.Send(ctx, ts)
+	// This will block if the queue is full.
+	err := s.loops[queueNum].seriesMbx.Send(ctx, ts)
+	if err != nil {
+		level.Error(s.logger).Log("msg", "failed to send to loop", "err", err)
+	}
 }

@@ -114,7 +114,7 @@ func (s *Queue) createEndpoints() error {
 			Username:       ep.BasicAuth.Username,
 			Password:       string(ep.BasicAuth.Password),
 			BatchCount:     ep.BatchCount,
-			FlushDuration:  ep.FlushDuration,
+			FlushFrequency: ep.FlushDuration,
 			Timeout:        ep.Timeout,
 			UserAgent:      "alloy",
 			ExternalLabels: s.args.ExternalLabels,

@@ -14,7 +14,7 @@ type ConnectionConfig struct {
 	RetryBackoff            time.Duration
 	MaxRetryBackoffAttempts time.Duration
 	BatchCount              int
-	FlushDuration           time.Duration
+	FlushFrequency          time.Duration
 	ExternalLabels          map[string]string
 	Connections             uint64
 }

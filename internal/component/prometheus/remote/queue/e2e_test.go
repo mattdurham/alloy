@@ -347,13 +347,13 @@ func newComponent(t *testing.T, l *logging.Logger, url string, exp chan types.Ex
 		Tracer:     nil,
 	}, types.Arguments{
 		TTL:           2 * time.Hour,
-		MaxFlushSize:  16 * 1024 * 1024,
+		MaxFlushSize:  10_000,
 		FlushDuration: 1 * time.Second,
 		Connections: []types.ConnectionConfig{{
 			Name:                    "test",
 			URL:                     url,
 			Timeout:                 20 * time.Second,
-			RetryBackoff:            1 * time.Second,
+			RetryBackoff:            5 * time.Second,
 			MaxRetryBackoffAttempts: 1,
 			BatchCount:              50,
 			FlushDuration:           1 * time.Second,
