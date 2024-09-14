@@ -47,6 +47,7 @@ type loop struct {
 }
 
 func newLoop(cc ConnectionConfig, isMetaData bool, log log.Logger, stats func(s types.NetworkStats)) *loop {
+	// TODO @mattdurham add TLS support afer the initial push.
 	l := &loop{
 		isMeta: isMetaData,
 		// In general we want a healthy queue of items, in this case we want to have 2x our maximum send sized ready.
@@ -125,17 +126,17 @@ attempt:
 		SendDuration: duration,
 	})
 	if result.successful {
-		l.finishSending()
+		l.sendingCleanup()
 		return
 	}
 	if !result.recoverableError {
-		l.finishSending()
+		l.sendingCleanup()
 		return
 	}
 	attempts++
 	if attempts > int(l.cfg.MaxRetryBackoffAttempts) && l.cfg.MaxRetryBackoffAttempts > 0 {
 		level.Debug(l.log).Log("msg", "max retry attempts reached", "attempts", attempts)
-		l.finishSending()
+		l.sendingCleanup()
 		return
 	}
 	// This helps us short circuit the loop if we are stopping.
@@ -156,7 +157,7 @@ type sendResult struct {
 	networkError     bool
 }
 
-func (l *loop) finishSending() {
+func (l *loop) sendingCleanup() {
 	types.PutTimeSeriesBinarySlice(l.series)
 	l.sendBuffer = l.sendBuffer[:0]
 	l.series = make([]*types.TimeSeriesBinary, 0, l.batchCount)
@@ -171,6 +172,7 @@ func (l *loop) send(ctx context.Context, retryCount int) sendResult {
 	}()
 	var err error
 	// Check to see if this is a retry and we can reuse the buffer.
+	// I wonder if we should do this, its possible we are sending things that have exceeded the TTL.
 	if len(l.sendBuffer) == 0 {
 		var data []byte
 		var wrErr error
