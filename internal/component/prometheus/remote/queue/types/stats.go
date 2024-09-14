@@ -51,10 +51,7 @@ func NewStats(namespace, subsystem string, registry prometheus.Registerer) *Prom
 		FilequeueInSeries: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: subsystem,
-			Name:      "filequeue_incoming_series",
-		}),
-		RemoteStorageInTimestamp: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "prometheus_remote_storage_highest_timestamp_in_seconds",
+			Name:      "filequeue_incoming",
 		}),
 		FilequeueNewestInTimeStampSeconds: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: namespace,
@@ -71,36 +68,33 @@ func NewStats(namespace, subsystem string, registry prometheus.Registerer) *Prom
 			Subsystem: subsystem,
 			Name:      "network_timestamp_seconds",
 		}),
-		RemoteStorageOutTimestamp: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "prometheus_remote_storage_queue_highest_sent_timestamp_seconds",
-		}),
 		RemoteStorageDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name: "prometheus_remote_storage_queue_duration_seconds",
 		}),
 		NetworkSeriesSent: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: subsystem,
-			Name:      "network_series_sent",
+			Name:      "network_sent",
 		}),
 		NetworkFailures: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: subsystem,
-			Name:      "network_failures",
+			Name:      "network_failed",
 		}),
 		NetworkRetries: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: subsystem,
-			Name:      "network_retries",
+			Name:      "network_retried",
 		}),
 		NetworkRetries429: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: subsystem,
-			Name:      "network_retries_429",
+			Name:      "network_retried_429",
 		}),
 		NetworkRetries5XX: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: subsystem,
-			Name:      "network_retries_5xx",
+			Name:      "network_retried_5xx",
 		}),
 		NetworkSentDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Namespace:                   namespace,
@@ -112,6 +106,12 @@ func NewStats(namespace, subsystem string, registry prometheus.Registerer) *Prom
 			Namespace: namespace,
 			Subsystem: subsystem,
 			Name:      "network_errors",
+		}),
+		RemoteStorageOutTimestamp: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "prometheus_remote_storage_queue_highest_sent_timestamp_seconds",
+		}),
+		RemoteStorageInTimestamp: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "prometheus_remote_storage_highest_timestamp_in_seconds",
 		}),
 		SamplesTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "prometheus_remote_storage_samples_total",

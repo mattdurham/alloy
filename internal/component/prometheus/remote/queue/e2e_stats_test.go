@@ -34,13 +34,13 @@ const retriedMetadata = "prometheus_remote_storage_metadata_retried_total"
 
 const prometheusDuration = "prometheus_remote_storage_queue_duration_seconds"
 
-const filequeueIncoming = "alloy_queue_series_filequeue_incoming_series"
-const alloySent = "alloy_queue_series_network_series_sent"
+const filequeueIncoming = "alloy_queue_series_filequeue_incoming"
+const alloySent = "alloy_queue_series_network_sent"
 const alloyFileQueueIncoming = "alloy_queue_series_filequeue_incoming_timestamp_seconds"
 const alloyNetworkDuration = "alloy_queue_series_network_duration_seconds"
-const alloyFailures = "alloy_queue_series_network_failures"
-const alloyRetries = "alloy_queue_series_network_retries"
-const alloy429 = "alloy_queue_series_network_retries_429"
+const alloyFailures = "alloy_queue_series_network_failed"
+const alloyRetries = "alloy_queue_series_network_retried"
+const alloy429 = "alloy_queue_series_network_retried_429"
 
 // TestMetrics is the large end to end testing for the queue based wal.
 func TestMetrics(t *testing.T) {
