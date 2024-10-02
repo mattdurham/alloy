@@ -110,10 +110,11 @@ func (s *Queue) createEndpoints() error {
 		stats.BackwardsCompatibility(reg)
 		meta := types.NewStats("alloy", "queue_metadata", reg)
 		client, err := network.New(network.ConnectionConfig{
-			URL:            ep.URL,
-			Username:       ep.BasicAuth.Username,
-			Password:       string(ep.BasicAuth.Password),
-			BatchCount:     ep.BatchCount,
+			URL:        ep.URL,
+			Username:   ep.BasicAuth.Username,
+			Password:   string(ep.BasicAuth.Password),
+			BatchCount: ep.BatchCount,
+			// Functionally this cannot go below 1s
 			FlushFrequency: ep.FlushDuration,
 			Timeout:        ep.Timeout,
 			UserAgent:      "alloy",
